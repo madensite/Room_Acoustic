@@ -5,26 +5,28 @@ import android.graphics.RectF
 import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.roomacoustic.data.AppDatabase
-import com.example.roomacoustic.data.RoomEntity
+import com.example.roomacoustic.data.*
 import com.example.roomacoustic.model.Speaker3D
 import com.example.roomacoustic.repo.RoomRepository
+import com.example.roomacoustic.repo.AnalysisRepository
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import com.example.roomacoustic.model.Vec3
-
-
 import com.example.roomacoustic.model.Measure3DResult
 
 class RoomViewModel(app: Application) : AndroidViewModel(app) {
 
-    /* ------------------------------------------------------------
-       1) 데이터베이스 / 레포지터리  &  방 리스트  (기존 코드)
-       ------------------------------------------------------------ */
-    private val repo = RoomRepository(AppDatabase.get(app).roomDao())
+    // ───────── DB/Repo 초기화 ─────────
+    private val db = AppDatabase.get(app)
 
+    private val repo = RoomRepository(db.roomDao())
+    private val analysisRepo = AnalysisRepository(
+        db.recordingDao(),
+        db.measureDao(),
+        db.speakerDao()
+    )
+
+    // ───────── 방 리스트 (기존) ─────────
     val rooms = repo.rooms.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
@@ -42,18 +44,14 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
     fun setChat(id: Int, flag: Boolean)    = viewModelScope.launch { repo.setChat(id, flag) }
     fun delete(room: RoomEntity)           = viewModelScope.launch { repo.delete(room) }
 
-    /* ------------------------------------------------------------
-       2) MiDaS 측정값  (기존 코드)
-       ------------------------------------------------------------ */
+    // ───────── MiDaS (기존) ─────────
     private val _measuredDimensions = MutableStateFlow<Triple<Float, Float, Float>?>(null)
     val measuredDimensions: StateFlow<Triple<Float, Float, Float>?> = _measuredDimensions.asStateFlow()
     fun setMeasuredRoomDimensions(w: Float, h: Float, d: Float) {
         _measuredDimensions.value = Triple(w, h, d)
     }
 
-    /* ------------------------------------------------------------
-       3) YOLOv8 결과 (기존 코드)
-       ------------------------------------------------------------ */
+    // ───────── YOLO (기존) ─────────
     private val _inferenceTime = MutableStateFlow<Long?>(null)
     val inferenceTime: StateFlow<Long?> = _inferenceTime.asStateFlow()
     fun setInferenceTime(ms: Long) { _inferenceTime.value = ms }
@@ -62,9 +60,7 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
     val speakerBoxes: StateFlow<List<RectF>> = _speakerBoxes.asStateFlow()
     fun setSpeakerBoxes(boxes: List<RectF>) { _speakerBoxes.value = boxes }
 
-    /* ------------------------------------------------------------
-       4) 종합 측정 결과 (기존 코드)
-       ------------------------------------------------------------ */
+    // ───────── 종합 측정 결과 (기존) ─────────
     data class MeasureResult(
         val width: Float?,
         val height: Float?,
@@ -82,52 +78,35 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         currentRoomId.value = null
     }
 
-    /* ------------------------------------------------------------
-       5) 3-D 스피커 좌표 관리  (기존 + 유지)
-       ------------------------------------------------------------ */
+    // ── 스피커 변경 버전 카운터 (Render 재구성 트리거)
+    private val _speakersVersion = MutableStateFlow(0)
+    val speakersVersion: StateFlow<Int> = _speakersVersion.asStateFlow()
 
-    /** 실시간 추적 스피커 리스트 (Compose 에서 직접 관찰 가능) */
+    // ───────── 실시간 스피커(메모리) ─────────
     private val _speakers = mutableStateListOf<Speaker3D>()
     val speakers: List<Speaker3D> get() = _speakers
 
-    /**
-     * YOLO + Depth 한 번 호출마다 실행.
-     * 같은 id 가 이미 있으면 좌표·타임스탬프만 갱신, 없으면 새로 추가.
-     */
     fun upsertSpeaker(id: Int, pos: FloatArray, frameNs: Long) {
         _speakers.firstOrNull { it.id == id }?.apply {
             worldPos   = pos
             lastSeenNs = frameNs
         } ?: _speakers.add(Speaker3D(id, pos, frameNs))
+        _speakersVersion.value = _speakersVersion.value + 1
     }
 
-    /**
-     * 지정 시간(timeoutSec) 이상 보이지 않은 스피커를 삭제.
-     * Camera Frame 타임스탬프(ns)와 비교.
-     */
     fun pruneSpeakers(frameNs: Long, timeoutSec: Int = 3) {
         _speakers.removeAll { (frameNs - it.lastSeenNs) / 1e9 > timeoutSec }
+        _speakersVersion.value = _speakersVersion.value + 1
     }
 
-    /* ------------------------------------------------------------
-       6) 🔵 AR 6점 측정 결과 (새로 추가)
-          - 기존 API(setMeasureResult(w,h,d,boxes))와 별도로 운용
-          - Compose/화면에서 수월히 구독하도록 StateFlow 사용
-       ------------------------------------------------------------ */
+    // ───────── AR 6점 측정 결과 (기존) ─────────
     private val _measure3DResult = MutableStateFlow<Measure3DResult?>(null)
     val measure3DResult: StateFlow<Measure3DResult?> = _measure3DResult.asStateFlow()
+    fun setMeasure3DResult(result: Measure3DResult) { _measure3DResult.value = result }
+    fun clearMeasure3DResult() { _measure3DResult.value = null }
 
-    fun setMeasure3DResult(result: Measure3DResult) {
-        _measure3DResult.value = result
-    }
-
-    fun clearMeasure3DResult() {
-        _measure3DResult.value = null
-    }
-
-    // ---------- 라벨링된 길이 측정값 ----------
+    // 라벨링된 길이 측정값 (기존)
     data class LabeledMeasure(val label: String, val meters: Float)
-
     private val _labeledMeasures = MutableStateFlow<List<LabeledMeasure>>(emptyList())
     val labeledMeasures = _labeledMeasures.asStateFlow()
     fun addLabeledMeasure(label: String, meters: Float) {
@@ -135,19 +114,52 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun clearLabeledMeasures() { _labeledMeasures.value = emptyList() }
 
-    // (선택) 스피커 수동 2점(좌/우) 지정 저장
+    // 수동 스피커 페어 (기존)
     private val _manualSpeakerPair = MutableStateFlow<Pair<Vec3, Vec3>?>(null)
     val manualSpeakerPair = _manualSpeakerPair.asStateFlow()
     fun setManualSpeakerPair(left: Vec3, right: Vec3) { _manualSpeakerPair.value = left to right }
     fun clearManualSpeakerPair() { _manualSpeakerPair.value = null }
 
     fun clearMeasureAndSpeakers() {
-        // 라벨-값(폭/깊이/높이) 저장 구조가 무엇이든 여기서 초기화
-        // 예) _labeledMeasures.value = emptyMap()
-        // 혹은 _measure3DResult.value = null 등 프로젝트 구조에 맞게
-        // 스피커 리스트도 초기화
         _speakers.clear()
         _speakerBoxes.value = emptyList()
+        _speakersVersion.value = _speakersVersion.value + 1
     }
 
+    // ──────────────── ★★★ 여기부터 “로컬 저장(분석)” 추가 ★★★ ────────────────
+
+    /** 최신 녹음/측정/스피커: currentRoomId에 따라 자동 전환 */
+    val latestRecording: StateFlow<RecordingEntity?> =
+        currentRoomId.flatMapLatest { id ->
+            if (id == null) flowOf(null) else analysisRepo.latestRecording(id)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val latestMeasure: StateFlow<MeasureEntity?> =
+        currentRoomId.flatMapLatest { id ->
+            if (id == null) flowOf(null) else analysisRepo.latestMeasure(id)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    val savedSpeakers: StateFlow<List<SpeakerEntity>> =
+        currentRoomId.flatMapLatest { id ->
+            if (id == null) flowOf(emptyList()) else analysisRepo.speakers(id)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** 저장 함수 */
+    fun saveRecordingForCurrentRoom(filePath: String, peak: Float, rms: Float, duration: Float) =
+        viewModelScope.launch {
+            val id = currentRoomId.value ?: return@launch
+            analysisRepo.saveRecording(id, filePath, peak, rms, duration)
+        }
+
+    fun saveMeasureForCurrentRoom(width: Float, depth: Float, height: Float) =
+        viewModelScope.launch {
+            val id = currentRoomId.value ?: return@launch
+            analysisRepo.saveMeasure(id, width, depth, height)
+        }
+
+    fun saveSpeakersSnapshot(worldPositions: List<FloatArray>) =
+        viewModelScope.launch {
+            val id = currentRoomId.value ?: return@launch
+            analysisRepo.replaceSpeakers(id, worldPositions)
+        }
 }

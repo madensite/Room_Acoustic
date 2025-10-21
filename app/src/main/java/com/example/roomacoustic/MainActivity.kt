@@ -12,6 +12,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.compose.navigation
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import androidx.navigation.NavBackStackEntry
 
 import com.example.roomacoustic.navigation.Screen
 import com.example.roomacoustic.screens.RoomScreen
@@ -68,7 +69,7 @@ fun AppRoot() {
 
             // ── 측정 플로우 서브그래프 ──
             navigation(
-                startDestination = Screen.MeasureWidth.route,  // ★ 폭 → 깊이 → 높이 → 탐지
+                startDestination = Screen.MeasureWidth.route,
                 route = Screen.MeasureGraph.route
             ) {
                 composable(Screen.MeasureWidth.route)  { MeasureWidthScreen(nav, vm) }
@@ -92,9 +93,15 @@ fun AppRoot() {
                 composable(Screen.TestGuide.route) { TestGuideScreen(nav, vm) }
                 composable(Screen.KeepTest.route)  { KeepTestScreen(nav, vm) }
 
-                // NOTE: Analysis 라우트는 "analysis/{roomId}" 형식이라면 argument 선언해도 좋음.
-                // 지금처럼 다른 곳에서만 진입하고 여기서 직접 push 안 하면 그대로 둬도 OK.
-                composable(Screen.Analysis.route)  { AnalysisScreen(nav, vm) }
+                // ★ Analysis: roomId 인자를 선언해 주세요!
+                composable(
+                    route = Screen.Analysis.route, // "analysis/{roomId}"
+                    arguments = listOf(navArgument("roomId") { type = NavType.IntType })
+                ) { backStackEntry ->
+                    // 필요 시 roomId 꺼내쓸 수도 있음
+                    // val roomId = backStackEntry.arguments!!.getInt("roomId")
+                    AnalysisScreen(nav, vm)
+                }
             }
         }
     }

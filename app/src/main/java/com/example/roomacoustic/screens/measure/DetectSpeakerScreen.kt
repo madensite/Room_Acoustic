@@ -48,6 +48,13 @@ import kotlin.math.acos
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import com.example.roomacoustic.util.YuvToRgbConverter
+import kotlin.math.roundToInt
+
+import com.example.roomacoustic.model.AxisFrame
+import com.example.roomacoustic.model.Measure3DResult
+import com.example.roomacoustic.model.Vec3 as MVec3
+import com.google.ar.core.TrackingState
+
 
 
 private enum class Phase { DETECT, MAP }
@@ -152,10 +159,18 @@ fun DetectSpeakerScreen(nav: NavController, vm: RoomViewModel) {
                     override fun onDetect(boxes: List<BoundingBox>, inferenceTime: Long) {
                         overlayView?.setResults(boxes)
                         vm.setSpeakerBoxes(boxes.map { RectF(it.x1, it.y1, it.x2, it.y2) })
+
                         overlayView?.let { ov ->
                             val w = ov.width.coerceAtLeast(1)
                             val h = ov.height.coerceAtLeast(1)
-                            pendingDetections = boxes.map { bb ->
+
+                            // ① IoU로 중복 제거
+                            val kept = dedupBoxesByIoU(boxes, iouThresh = 0.6f)
+
+                            // ② 최대 2개까지만 사용(스테레오 가정)
+                            val top2 = kept.take(2)
+
+                            pendingDetections = top2.map { bb ->
                                 val cx = ((bb.x1 + bb.x2) * 0.5f / w).coerceIn(0f, 1f)
                                 val cy = ((bb.y1 + bb.y2) * 0.5f / h).coerceIn(0f, 1f)
                                 val bw = (kotlin.math.abs(bb.x2 - bb.x1) / w).coerceIn(0f, 1f)
@@ -240,42 +255,27 @@ fun DetectSpeakerScreen(nav: NavController, vm: RoomViewModel) {
         val sceneView = remember {
             ARSceneView(context = ctx, sharedLifecycle = lifecycleOwner.lifecycle).apply {
                 configureSession { _, cfg ->
-                    // 더 호환 잘 되는 AUTOMATIC 권장 (RAW_DEPTH_ONLY 는 기기 따라 비활성인 경우 있음)
                     try { cfg.depthMode = Config.DepthMode.AUTOMATIC } catch (_: Throwable) {}
                     cfg.planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL
                 }
             }
         }
 
-        // MAP 단계 전용(충돌 방지용) CPU 감지기 + YUV 변환기
-        val yuv = remember { YuvToRgbConverter(ctx) }
-        var detMap by remember { mutableStateOf<Detector?>(null) }
-
         var viewW by remember { mutableIntStateOf(0) }
         var viewH by remember { mutableIntStateOf(0) }
-        var solved by remember { mutableIntStateOf(0) }
+
+        // ✅ “후보별 1회만 성공”을 위한 Set
+        // 후보 인덱스(0..n-1) 중 이미 성공한 것들
+        var solvedCandidates by remember { mutableStateOf(setOf<Int>()) }
+        // UI에 바로 쓰는 카운트
+        var solvedCount by remember { mutableIntStateOf(0) }
+
         var isRunning by remember { mutableStateOf(true) }
         var info by remember { mutableStateOf("AR 프레임에서 재탐지 중… 기기를 천천히 움직여 주세요") }
         var errorMsg by remember { mutableStateOf<String?>(null) }
 
-        // 사용자가 입력하는 스피커 폭(크기 기반 폴백용)
         var speakerWidthCm by remember { mutableStateOf(18f) }
-
-        // 감지는 너무 자주 돌리지 않도록 프레임 간격 제어
-        var frameTick by remember { mutableIntStateOf(0) }
-        val DETECT_EVERY_N = 2 // 2프레임마다 한 번
-
-        // 초기화: MAP 전용 Detector (CPU)
-        LaunchedEffect(Unit) {
-            detMap = Detector(
-                ctx, Constants.MODEL_PATH, Constants.LABELS_PATH,
-                detectorListener = null, message = {}
-            ).apply {
-                // GPU 끄기 (ARCore + TFLite GPU 충돌 회피)
-                restart(useGpu = false)
-                warmUp()
-            }
-        }
+        var basisSet by remember { mutableStateOf(false) } // 기준 프레임 1회만 세팅
 
         Box(
             Modifier.fillMaxSize().background(Color.Black).wrapContentSize(Alignment.Center)
@@ -293,8 +293,8 @@ fun DetectSpeakerScreen(nav: NavController, vm: RoomViewModel) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    if (isRunning) "$info  (완료: $solved)"
-                    else "완료: $solved 개",
+                    if (isRunning) "$info  (완료: $solvedCount)"
+                    else "완료: $solvedCount 개",
                     color = Color.White
                 )
                 Spacer(Modifier.height(8.dp))
@@ -331,110 +331,108 @@ fun DetectSpeakerScreen(nav: NavController, vm: RoomViewModel) {
             }
         }
 
-        // AR 프레임 루프: 재탐지 → depth/hitTest/크기 폴백 → 월드 좌표 업데이트
-        LaunchedEffect(sceneView, viewW, viewH, detMap) {
-            if (viewW <= 0 || viewH <= 0 || detMap == null) return@LaunchedEffect
+        // AR 프레임 루프
+        LaunchedEffect(sceneView, viewW, viewH, pendingDetections) {
+            if (viewW <= 0 || viewH <= 0) return@LaunchedEffect
+            if (pendingDetections.isEmpty()) {
+                isRunning = false
+                info = "탐지된 스피커 후보가 없습니다."
+                return@LaunchedEffect
+            }
 
             sceneView.onSessionUpdated = upd@ { _: Session, frame: Frame ->
                 if (!isRunning) return@upd
-                frameTick++
 
-                val cam = frame.camera
-                if (cam.trackingState != com.google.ar.core.TrackingState.TRACKING) {
-                    info = "카메라 추적 중…(패턴/텍스처 있는 곳을 향해 천천히 이동)"
+                if (frame.camera.trackingState != com.google.ar.core.TrackingState.TRACKING) {
+                    info = "카메라 추적 중…(패턴/텍스처 보이는 곳을 향해 천천히 이동)"
                     return@upd
                 }
 
-                // N프레임마다 한 번만 감지
-                if (frameTick % DETECT_EVERY_N != 0) return@upd
-
-                // 1) ARCore CPU 이미지 → Bitmap
-                val cpu = try { frame.acquireCameraImage() } catch (_: Throwable) { null } ?: return@upd
-                val bmp = try {
-                    // 재사용 없이 간단 생성 (지연/GC 이슈 있으면 재사용 버퍼로 바꿔도 됨)
-                    val tmp = Bitmap.createBitmap(cpu.width, cpu.height, Bitmap.Config.ARGB_8888)
-                    yuv.yuvToRgb(cpu, tmp)   // YUV → ARGB (당신의 YuvToRgbConverter 확장 util)
-                    tmp
-                } finally {
-                    cpu.close()
-                }
-
-                // 2) 모델 인퍼런스(정사각 입력) — 결과 좌표는 IMAGE_PIXELS 기준으로 돌려받도록 width/height 전달
-                val det = detMap ?: return@upd
-                val square = Bitmap.createScaledBitmap(bmp, det.inputSize, det.inputSize, false)
-                val boxes = try { det.detect(square, bmp.width, bmp.height) } catch (_: Throwable) { emptyList() }
-
-                if (boxes.isEmpty()) {
-                    info = "재탐지 중…(스피커가 화면에 충분히 크게 나오게)"
-                    return@upd
-                }
-
-                // 3) 각 박스 중심을 IMAGE_PIXELS→VIEW 로 변환
-                val ptsIn = FloatArray(boxes.size * 2)
-                boxes.forEachIndexed { i, bb ->
-                    val cx = (bb.x1 + bb.x2) * 0.5f
-                    val cy = (bb.y1 + bb.y2) * 0.5f
-                    ptsIn[i * 2] = cx
-                    ptsIn[i * 2 + 1] = cy
-                }
-                val ptsOut = FloatArray(ptsIn.size)
-                try {
-                    frame.transformCoordinates2d(
-                        Coordinates2d.IMAGE_PIXELS, ptsIn,
-                        Coordinates2d.VIEW, ptsOut
+                // 기준 좌표계 1회 세팅 (카메라 pose 기반)
+                if (!basisSet && vm.measure3DResult.value == null) {
+                    val pose = frame.camera.pose
+                    val origin = MVec3(pose.tx(), pose.ty(), pose.tz())
+                    val vxV3 = rotateByPose(pose, V3(1f, 0f, 0f)).normalize()
+                    val vyV3 = rotateByPose(pose, V3(0f, 1f, 0f)).normalize()
+                    val vzV3 = rotateByPose(pose, V3(0f, 0f,-1f)).normalize()
+                    vm.setMeasure3DResult(
+                        Measure3DResult(
+                            frame = AxisFrame(
+                                origin = origin,
+                                vx = MVec3(vxV3.x, vxV3.y, vxV3.z),
+                                vy = MVec3(vyV3.x, vyV3.y, vyV3.z),
+                                vz = MVec3(vzV3.x, vzV3.y, vzV3.z)
+                            ),
+                            width = 0f, depth = 0f, height = 0f
+                        )
                     )
-                } catch (t: Throwable) {
-                    errorMsg = "좌표 변환 실패: ${t.message}"
-                    isRunning = false
-                    try { sceneView.onSessionUpdated = null } catch (_: Throwable) {}
-                    return@upd
+                    basisSet = true
                 }
 
-                // 4) 각 중심점에 대해: 우선 depth 샘플 → 없으면 hitTest → 그래도 없으면 크기 기반 Z
-                val nowTs = System.nanoTime()
-                val intr = frame.camera.imageIntrinsics
-                val f = intr.focalLength
-                val fx = f.getOrNull(0) ?: 0f
-                val W_real = (speakerWidthCm / 100f).coerceAtLeast(0.01f)
+                try {
+                    val nowTs = System.nanoTime()
+                    val usedIds = hashSetOf<Int>() // 같은 프레임 내 id 중복 방지
 
-                var localSolved = 0
-                boxes.forEachIndexed { i, bb ->
-                    val sx = ptsOut[i * 2]
-                    val sy = ptsOut[i * 2 + 1]
+                    // 후보별 1회만 성공 처리
+                    pendingDetections.forEachIndexed { i, det ->
+                        if (i in solvedCandidates) return@forEachIndexed // 이미 끝난 후보 스킵
 
-                    // depth 우선
-                    val depthM = sampleDepthMeters(frame, sx, sy, winRadius = 3, validMin = 0.2f, validMax = 10f)
-                    val world = if (depthM != null) {
-                        val ray = buildWorldRay(frame, sx, sy) ?: return@forEachIndexed
-                        floatArrayOf(ray.ro.x + ray.rd.x * depthM, ray.ro.y + ray.rd.y * depthM, ray.ro.z + ray.rd.z * depthM)
-                    } else {
-                        // hitTest 폴백
-                        val hp = hitTestOrDepth(frame, sx, sy)
-                        if (hp != null) floatArrayOf(hp.x, hp.y, hp.z) else run {
-                            // 크기 기반 폴백(Z ≈ fx * W / w_img)
-                            val wImg = kotlin.math.abs(bb.x2 - bb.x1).coerceAtLeast(1f)
-                            if (fx <= 1f) return@forEachIndexed
-                            val ray = buildWorldRay(frame, sx, sy) ?: return@forEachIndexed
-                            val Z = (fx * W_real / wImg).coerceIn(0.2f, 10f)
-                            floatArrayOf(ray.ro.x + ray.rd.x * Z, ray.ro.y + ray.rd.y * Z, ray.ro.z + ray.rd.z * Z)
+                        val sx = (det.cxNorm * viewW).coerceIn(0f, viewW.toFloat())
+                        val sy = (det.cyNorm * viewH).coerceIn(0f, viewH.toFloat())
+
+                        val depthPx = viewToDepthPx(frame, sx, sy)
+                        val depthMeters = if (depthPx != null) {
+                            val (dx, dy) = depthPx
+                            try { frame.acquireDepthImage16Bits() } catch (_: Throwable) { null }?.use { dimg ->
+                                sampleDepthWindowMeters(
+                                    depthImage = dimg,
+                                    dx = dx, dy = dy,
+                                    winRadius = 3,
+                                    validMin = 0.2f,
+                                    validMax = 10f
+                                )
+                            }
+                        } else null
+
+                        fun commit(world: FloatArray) {
+                            val id = SimpleTracker.assignId(world)
+                            if (usedIds.add(id)) {
+                                if (i !in solvedCandidates) {
+                                    solvedCandidates = solvedCandidates + i   // 새 Set로 교체 → Compose 감지
+                                    solvedCount += 1
+                                    vm.upsertSpeaker(id, world, nowTs)
+                                    vm.pruneSpeakers(nowTs)
+                                }
+                            }
+                        }
+
+                        if (depthMeters != null) {
+                            val imgPts = FloatArray(2)
+                            frame.transformCoordinates2d(
+                                Coordinates2d.VIEW,
+                                floatArrayOf(sx, sy),
+                                Coordinates2d.IMAGE_PIXELS,
+                                imgPts
+                            )
+                            val world = backprojectToWorld(frame, imgPts[0], imgPts[1], depthMeters)
+                            commit(world)
+                        } else {
+                            val hp = hitTestOrDepth(frame, sx, sy)
+                            if (hp != null) commit(floatArrayOf(hp.x, hp.y, hp.z))
                         }
                     }
 
-                    val id = SimpleTracker.assignId(world)
-                    vm.upsertSpeaker(id, world, nowTs)
-                    localSolved++
-                }
-
-                vm.pruneSpeakers(nowTs)
-                solved += localSolved
-
-                // 한 번 성공했으면 종료(원한다면 keep-running 으로 바꿔도 됨)
-                if (localSolved > 0) {
+                    if (solvedCandidates.size >= pendingDetections.size) {
+                        isRunning = false
+                        info = "완료: ${solvedCandidates.size} 개"
+                        try { sceneView.onSessionUpdated = null } catch (_: Throwable) {}
+                    } else {
+                        info = "깊이 샘플링 중… (완료: ${solvedCandidates.size} / 총 ${pendingDetections.size})"
+                    }
+                } catch (t: Throwable) {
+                    errorMsg = "깊이 역투영 오류: ${t.message ?: "unknown"}"
                     isRunning = false
-                    info = "완료"
                     try { sceneView.onSessionUpdated = null } catch (_: Throwable) {}
-                } else {
-                    info = "재탐지 중…"
                 }
             }
         }
@@ -442,11 +440,11 @@ fun DetectSpeakerScreen(nav: NavController, vm: RoomViewModel) {
         DisposableEffect(Unit) {
             onDispose {
                 try { sceneView.onSessionUpdated = null } catch (_: Throwable) {}
-                try { detMap?.close() } catch (_: Throwable) {}
                 sceneView.destroy()
             }
         }
     }
+
 }
 
 /* -----------------------------------------------------------
@@ -608,6 +606,104 @@ private fun buildWorldRay(frame: Frame, sx: Float, sy: Float): Ray? {
     return Ray(ro, rd.normalize())
 }
 
+// ───────────────── DEPTH 샘플링 & 역투영 유틸 ─────────────────
+
+// DEPTH16 이미지에서 (dx,dy) 주변 winRadius 창의 중앙값(m)을 반환
+private fun sampleDepthWindowMeters(
+    depthImage: android.media.Image,
+    dx: Float, dy: Float,
+    winRadius: Int = 3,
+    validMin: Float = 0.2f,
+    validMax: Float = 10f
+): Float? {
+    val w = depthImage.width
+    val h = depthImage.height
+    val cx = dx.roundToInt().coerceIn(0, w - 1)
+    val cy = dy.roundToInt().coerceIn(0, h - 1)
+
+    val plane = depthImage.planes[0]
+    val buf = plane.buffer.duplicate().order(java.nio.ByteOrder.LITTLE_ENDIAN)
+
+    val values = ArrayList<Float>( (2*winRadius+1)*(2*winRadius+1) )
+    val rowStride = plane.rowStride
+    val pixelStride = plane.pixelStride // DEPTH16 보통 2
+
+    for (iy in (cy - winRadius).coerceAtLeast(0)..(cy + winRadius).coerceAtMost(h - 1)) {
+        val rowOff = iy * rowStride
+        for (ix in (cx - winRadius).coerceAtLeast(0)..(cx + winRadius).coerceAtMost(w - 1)) {
+            val off = rowOff + ix * pixelStride
+            if (off + 1 < buf.capacity()) {
+                val mm = buf.getShort(off).toInt() and 0xFFFF // unsigned 16-bit mm
+                if (mm > 0) {
+                    val m = mm * 0.001f
+                    if (m in validMin..validMax) values.add(m)
+                }
+            }
+        }
+    }
+    if (values.isEmpty()) return null
+    values.sort()
+    return values[values.size / 2]
+}
+
+// VIEW(px) → IMAGE_PIXELS(px) → DEPTH(px) 좌표로 변환 (DEPTH 좌표 반환)
+private fun viewToDepthPx(frame: Frame, viewX: Float, viewY: Float): Pair<Float, Float>? {
+    // VIEW → IMAGE_PIXELS
+    val inPts = floatArrayOf(viewX, viewY)
+    val imgPts = FloatArray(2)
+    frame.transformCoordinates2d(Coordinates2d.VIEW, inPts, Coordinates2d.IMAGE_PIXELS, imgPts)
+
+    // IMAGE_PIXELS → DEPTH 스케일(해상도 스케일링)
+    val imgDims = frame.camera.imageIntrinsics.imageDimensions
+    val imgW = imgDims[0].coerceAtLeast(1)
+    val imgH = imgDims[1].coerceAtLeast(1)
+
+    val depth = try { frame.acquireDepthImage16Bits() } catch (_: Throwable) { null } ?: return null
+    depth.use { dimg ->
+        val dx = imgPts[0] * dimg.width / imgW
+        val dy = imgPts[1] * dimg.height / imgH
+        return dx to dy
+    }
+}
+
+// (u,v, Z[m]) + 내부파라미터 + 카메라 pose → 월드 좌표
+private fun backprojectToWorld(
+    frame: Frame,
+    uImg: Float, vImg: Float,
+    depthMeters: Float
+): FloatArray {
+    val K = getIntrinsics(frame) // (fx,fy,cx,cy) : IMAGE_PIXELS 좌표계
+    // 카메라 좌표계 (ARCore는 -Z 전방)
+    val Xc = (uImg - K.cx) / K.fx * depthMeters
+    val Yc = (vImg - K.cy) / K.fy * depthMeters
+    val Zc = -depthMeters
+    val cam = floatArrayOf(Xc, Yc, Zc)
+    val world = frame.camera.pose.transformPoint(cam) // 카메라좌표 → 월드
+    return world
+}
+
+private fun iou(a: BoundingBox, b: BoundingBox): Float {
+    val x1 = max(a.x1, b.x1)
+    val y1 = max(a.y1, b.y1)
+    val x2 = min(a.x2, b.x2)
+    val y2 = min(a.y2, b.y2)
+    val inter = max(0f, x2 - x1) * max(0f, y2 - y1)
+    val areaA = max(0f, a.x2 - a.x1) * max(0f, a.y2 - a.y1)
+    val areaB = max(0f, b.x2 - b.x1) * max(0f, b.y2 - b.y1)
+    val union = areaA + areaB - inter
+    return if (union <= 0f) 0f else inter / union
+}
+
+private fun dedupBoxesByIoU(src: List<BoundingBox>, iouThresh: Float): List<BoundingBox> {
+    val out = mutableListOf<BoundingBox>()
+    // ★ cnf(신뢰도) 기준으로 내림차순 정렬
+    for (b in src.sortedByDescending { it.cnf }) {
+        if (out.none { iou(it, b) >= iouThresh }) out += b
+    }
+    return out
+}
+
+
 /* ───────── Triangulator (현재는 사용 안 함 / 보관) ───────── */
 private class Triangulator(
     private val minAngleDeg: Float = 3f,
@@ -713,4 +809,5 @@ private class Triangulator(
         val pz = (c20*bx + c21*by + c22*bz) / det
         return V3(px, py, pz)
     }
+
 }

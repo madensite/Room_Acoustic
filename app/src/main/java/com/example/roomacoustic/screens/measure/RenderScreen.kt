@@ -28,18 +28,7 @@ import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
 import androidx.compose.ui.graphics.Color
 
-/** ───────────────── 변경 요약 ─────────────────
- *  - OpenGL ES 2.0 기반 3D 뷰포트(RoomViewport3DGL) 추가
- *  - 중앙 반투명 직육면체 + 스피커 점 + 오빗/줌 제스처
- *  - 하단 요약(W/D/H) + [상세정보] 모달(측정값/편집)
- *  - 월드→로컬 변환은 기존 축 규칙(W=X, D=Z, H=Y) 유지
- */
-
 data class RoomSize(val w: Float, val d: Float, val h: Float)
-
-/* ──────────────────────────────────────────── */
-/* RenderScreen                                 */
-/* ──────────────────────────────────────────── */
 
 @Composable
 fun RenderScreen(
@@ -54,8 +43,11 @@ fun RenderScreen(
     }
 
     val labeled = vm.labeledMeasures.collectAsState().value
-    val speakers = vm.speakers
     val frame3D  = vm.measure3DResult.collectAsState().value
+
+    // 스피커 재구성 트리거
+    val speakersVersion = vm.speakersVersion.collectAsState(0).value
+    val speakers = remember(speakersVersion) { vm.speakers.toList() }
 
     val bannerColor = if (detected) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.error
@@ -65,30 +57,35 @@ fun RenderScreen(
     var manualRoomSize by rememberSaveable { mutableStateOf<RoomSize?>(null) }
     val roomSize = manualRoomSize ?: autoRoomSize
 
-    // 월드→로컬(W, H, D) 변환 람다
-    // 기존 (문제): val m = frame3D ?: return@remember null
-    val toLocal: (FloatArray) -> Triple<Float, Float, Float>? = remember(frame3D) {
+    // 월드→로컬(W, H, D) 변환
+    val toLocal: (FloatArray) -> Vec3? = remember(frame3D) {
         { p ->
-            val m = frame3D
-            if (m == null) {
-                null
-            } else {
+            frame3D?.let { m ->
                 val origin = m.frame.origin
                 val vx = m.frame.vx
                 val vy = m.frame.vy
                 val vz = m.frame.vz
                 val d = Vec3(p[0], p[1], p[2]) - origin
-                Triple(d.dot(vx), d.dot(vy), d.dot(vz))
+                Vec3(d.dot(vx), d.dot(vy), d.dot(vz))
             }
+            // frame3D가 null이면 let이 실행되지 않으므로 자연스럽게 null 반환
         }
     }
 
+    // 1) 월드 → 로컬
+    val speakersLocalRaw = remember(speakers, frame3D) {
+        speakers.mapNotNull { sp -> toLocal(sp.worldPos) }
+    }
 
-    // 스피커 로컬 좌표 목록 (W,H,D)
-    val speakersLocal = remember(speakers, frame3D) {
-        speakers.mapNotNull { sp ->
-            toLocal(sp.worldPos)?.let { (w, h, d) -> Vec3(w, h, d) }
-        }
+    // 2) 근접 중복 제거(10cm 미만은 같은 점 처리)
+    val speakersLocalDedup = remember(speakersLocalRaw) {
+        dedupByDistance(speakersLocalRaw, threshold = 0.10f)
+    }
+
+    // 3) 방 중심으로 자동 정렬(시각적 안정화; 절대 오프셋은 보정 X)
+    val speakersLocal = remember(speakersLocalDedup, roomSize) {
+        if (roomSize == null || speakersLocalDedup.isEmpty()) speakersLocalDedup
+        else autoCenterToRoom(speakersLocalDedup, roomSize)
     }
 
     var showInput by rememberSaveable { mutableStateOf(false) }
@@ -103,9 +100,16 @@ fun RenderScreen(
                 .weight(1f)
         ) {
             if (roomSize != null) {
+                val clamped = speakersLocal.map { p ->
+                    Vec3(
+                        x = p.x.coerceIn(0f, roomSize.w),
+                        y = p.y.coerceIn(0f, roomSize.h),
+                        z = p.z.coerceIn(0f, roomSize.d)
+                    )
+                }
                 RoomViewport3DGL(
                     room = roomSize,
-                    speakersLocal = speakersLocal,
+                    speakersLocal = clamped,
                     modifier = Modifier
                         .align(Alignment.Center)
                         .fillMaxWidth()
@@ -122,6 +126,14 @@ fun RenderScreen(
             }
         }
 
+        // 디버그 표시
+        Text(
+            text = "스피커(월드): ${speakers.size} / 로컬 변환: ${speakersLocalRaw.size}" +
+                    (if (frame3D == null) "  [frame3D 없음]" else ""),
+            color = Color(0xFFB0BEC5),
+            style = MaterialTheme.typography.bodySmall
+        )
+
         /* 하단 요약 + 상세정보 버튼 */
         Row(
             Modifier.fillMaxWidth(),
@@ -132,7 +144,7 @@ fun RenderScreen(
                 Text(
                     "W ${"%.2f".format(roomSize.w)}m · D ${"%.2f".format(roomSize.d)}m · H ${"%.2f".format(roomSize.h)}m",
                     style = MaterialTheme.typography.titleMedium,
-                    color = Color(0xFFEEEEEE) // 밝은 회색 고정
+                    color = Color(0xFFEEEEEE)
                 )
             } else {
                 Text("W/D/H 미지정", style = MaterialTheme.typography.titleMedium)
@@ -145,7 +157,7 @@ fun RenderScreen(
 
         Spacer(Modifier.height(8.dp))
 
-        /* 중앙 배너 (간결) */
+        /* 중앙 배너 */
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.Center
@@ -307,16 +319,13 @@ private fun RoomViewport3DGL(
 ) {
     val context = LocalContext.current
 
-    // 오빗 상태
     var yaw by rememberSaveable { mutableStateOf(30f) }    // 좌우
     var pitch by rememberSaveable { mutableStateOf(20f) }  // 상하
     var zoom by rememberSaveable { mutableStateOf(1.0f) }  // 0.5 ~ 3.0
 
-    // GLSurfaceView + Renderer
     AndroidView(
         modifier = modifier
             .pointerInput(Unit) {
-                // 제스처: 회전(드래그), 줌(핀치)
                 detectTransformGestures { _, pan, zoomChange, _ ->
                     yaw += pan.x * 0.3f
                     pitch = (pitch + (-pan.y * 0.3f)).coerceIn(-80f, 80f)
@@ -348,7 +357,6 @@ private fun RoomViewport3DGL(
 
 private class GLRoomRenderer : GLSurfaceView.Renderer {
 
-    // 쉐이더
     private val vsh = """
         attribute vec3 aPos;
         uniform mat4 uMVP;
@@ -365,29 +373,24 @@ private class GLRoomRenderer : GLSurfaceView.Renderer {
         void main(){ gl_FragColor = uColor; }
     """.trimIndent()
 
-    // GL 핸들
     private var prog = 0
     private var aPos = 0
     private var uMVP = 0
     private var uColor = 0
     private var uPointSize = 0
 
-    // 매트릭스
     private val proj = FloatArray(16)
     private val view = FloatArray(16)
     private val model = FloatArray(16)
     private val mvp = FloatArray(16)
 
-    // 룸/스피커
     @Volatile private var room: RoomSize? = null
-    @Volatile private var speakers: FloatArray = floatArrayOf()  // 연속 xyz
+    @Volatile private var speakers: FloatArray = floatArrayOf()
 
-    // 오빗 상태
     @Volatile private var yaw = 30f
     @Volatile private var pitch = 20f
     @Volatile private var zoom = 1.0f
 
-    // 버텍스(박스 면/엣지)
     private var roomTriangles = floatArrayOf()
     private var roomEdges = floatArrayOf()
 
@@ -416,18 +419,15 @@ private class GLRoomRenderer : GLSurfaceView.Renderer {
         val room = room ?: return
         ensureRoomGeometry(room)
 
-        // 카메라: 방 크기에 따라 거리 자동 산정
         val radius = 0.5f * sqrt(room.w*room.w + room.h*room.h + room.d*room.d)
         val camDist = (radius * 2.2f) / zoom
 
-        // 오빗 카메라 위치
         val yawRad = Math.toRadians(yaw.toDouble()).toFloat()
         val pitchRad = Math.toRadians(pitch.toDouble()).toFloat()
         val cx = (camDist * cos(pitchRad) * sin(yawRad))
         val cy = (camDist * sin(pitchRad))
         val cz = (camDist * cos(pitchRad) * cos(yawRad))
 
-        // 룸을 원점에 두기 위해 중심 이동
         Matrix.setLookAtM(
             view, 0,
             cx, cy, cz,
@@ -436,25 +436,21 @@ private class GLRoomRenderer : GLSurfaceView.Renderer {
         )
         Matrix.setIdentityM(model, 0)
 
-        // 공통 셰이더 설정
         GLES20.glUseProgram(prog)
 
-        // ---- 반투명 면(삼각형) ----
         Matrix.multiplyMM(mvp, 0, view, 0, model, 0)
         Matrix.multiplyMM(mvp, 0, proj, 0, mvp, 0)
         GLES20.glUniformMatrix4fv(uMVP, 1, false, mvp, 0)
-        GLES20.glUniform4f(uColor, 1f, 1f, 1f, 0.18f)  // 반투명 흰색
+        GLES20.glUniform4f(uColor, 1f, 1f, 1f, 0.18f)
         GLES20.glEnableVertexAttribArray(aPos)
         GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, roomTriangles.toBuffer())
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, roomTriangles.size / 3)
 
-        // ---- 엣지(라인) ----
         GLES20.glUniform4f(uColor, 1f, 1f, 1f, 0.65f)
         GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, roomEdges.toBuffer())
         GLES20.glLineWidth(2f)
         GLES20.glDrawArrays(GLES20.GL_LINES, 0, roomEdges.size / 3)
 
-        // ---- 스피커(포인트) ----
         if (speakers.isNotEmpty()) {
             GLES20.glUniform4f(uColor, 1f, 0.6f, 0.2f, 1f)
             GLES20.glUniform1f(uPointSize, 18f)
@@ -465,13 +461,9 @@ private class GLRoomRenderer : GLSurfaceView.Renderer {
         GLES20.glDisableVertexAttribArray(aPos)
     }
 
-    fun setRoom(room: RoomSize) {
-        this.room = room
-        // 지오메트리 갱신은 다음 프레임에 ensureRoomGeometry에서 처리
-    }
+    fun setRoom(room: RoomSize) { this.room = room }
 
     fun setSpeakers(list: List<Vec3>) {
-        // 로컬 좌표(W,H,D)를 원점 중심으로 변환
         val r = room ?: return
         val cx = r.w * 0.5f
         val cy = r.h * 0.5f
@@ -486,20 +478,15 @@ private class GLRoomRenderer : GLSurfaceView.Renderer {
     }
 
     fun setOrbit(yaw: Float, pitch: Float, zoom: Float) {
-        this.yaw = yaw
-        this.pitch = pitch
-        this.zoom = zoom
+        this.yaw = yaw; this.pitch = pitch; this.zoom = zoom
     }
 
     private fun ensureRoomGeometry(room: RoomSize) {
         if (roomTriangles.isNotEmpty()) return
-
-        // 중심 원점 기준 half-extent
         val hx = room.w * 0.5f
         val hy = room.h * 0.5f
         val hz = room.d * 0.5f
 
-        // 8 꼭짓점
         val v000 = floatArrayOf(-hx, -hy, -hz)
         val v100 = floatArrayOf( hx, -hy, -hz)
         val v110 = floatArrayOf( hx,  hy, -hz)
@@ -509,34 +496,22 @@ private class GLRoomRenderer : GLSurfaceView.Renderer {
         val v111 = floatArrayOf( hx,  hy,  hz)
         val v011 = floatArrayOf(-hx,  hy,  hz)
 
-        // 12개 삼각형(각 면 2개)
         roomTriangles = floatArrayOf(
-            // -Z (뒷면)
             *v000, *v100, *v110,   *v000, *v110, *v010,
-            // +Z (앞면)
             *v001, *v101, *v111,   *v001, *v111, *v011,
-            // -X
             *v000, *v001, *v011,   *v000, *v011, *v010,
-            // +X
             *v100, *v101, *v111,   *v100, *v111, *v110,
-            // -Y (바닥)
             *v000, *v100, *v101,   *v000, *v101, *v001,
-            // +Y (천장)
             *v010, *v110, *v111,   *v010, *v111, *v011
         )
 
-        // 엣지(라인)
         roomEdges = floatArrayOf(
-            // 아래 사각
             *v000, *v100,  *v100, *v101,  *v101, *v001,  *v001, *v000,
-            // 위 사각
             *v010, *v110,  *v110, *v111,  *v111, *v011,  *v011, *v010,
-            // 기둥
             *v000, *v010,  *v100, *v110,  *v101, *v111,  *v001, *v011
         )
     }
 
-    /* ── GL 유틸 ── */
     private fun linkProgram(vSrc: String, fSrc: String): Int {
         fun compile(type: Int, src: String): Int {
             val s = GLES20.glCreateShader(type)
@@ -578,8 +553,35 @@ private fun fmt(v: Float) = String.format("%.2f", v)
 private operator fun Vec3.minus(o: Vec3) = Vec3(x - o.x, y - o.y, z - o.z)
 private fun Vec3.dot(o: Vec3) = x * o.x + y * o.y + z * o.z
 
-// FloatArray → NIO Buffer (간단 헬퍼)
 private fun FloatArray.toBuffer(): java.nio.FloatBuffer =
-    java.nio.ByteBuffer.allocateDirect(this.size * 4).order(java.nio.ByteOrder.nativeOrder()).asFloatBuffer().apply {
-        put(this@toBuffer); position(0)
+    java.nio.ByteBuffer.allocateDirect(this.size * 4)
+        .order(java.nio.ByteOrder.nativeOrder())
+        .asFloatBuffer().apply { put(this@toBuffer); position(0) }
+
+/* ── 새로 추가된 도우미 ── */
+
+// 포인트 간 거리가 threshold 미만이면 중복으로 제거
+private fun dedupByDistance(points: List<Vec3>, threshold: Float): List<Vec3> {
+    if (points.size <= 1) return points
+    val out = mutableListOf<Vec3>()
+    for (p in points) {
+        val dup = out.any { q ->
+            val dx = p.x - q.x; val dy = p.y - q.y; val dz = p.z - q.z
+            sqrt(dx*dx + dy*dy + dz*dz) < threshold
+        }
+        if (!dup) out += p
     }
+    return out
+}
+
+// 로컬 포인트들의 무게중심을 방 중심(W/2,H/2,D/2)으로 평행이동
+private fun autoCenterToRoom(points: List<Vec3>, room: RoomSize): List<Vec3> {
+    if (points.isEmpty()) return points
+    val cx = points.map { it.x }.average().toFloat()
+    val cy = points.map { it.y }.average().toFloat()
+    val cz = points.map { it.z }.average().toFloat()
+    val tx = room.w * 0.5f - cx
+    val ty = room.h * 0.5f - cy
+    val tz = room.d * 0.5f - cz
+    return points.map { Vec3(it.x + tx, it.y + ty, it.z + tz) }
+}
