@@ -10,6 +10,9 @@ import androidx.navigation.NavController
 import com.example.roomacoustic.navigation.Screen
 import kotlinx.coroutines.delay
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import com.example.roomacoustic.R
@@ -25,6 +28,7 @@ fun SplashScreen(nav: NavController) {
     Box(
         Modifier
             .fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(top = 10.dp),
         contentAlignment = Alignment.Center
     ) {

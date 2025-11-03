@@ -19,6 +19,13 @@ import com.example.roomacoustic.util.playWav
 import com.example.roomacoustic.viewmodel.RoomViewModel
 import com.example.roomacoustic.navigation.Screen
 
+import com.example.roomacoustic.util.computeAcousticMetrics
+import com.example.roomacoustic.util.AcousticMetrics
+import com.example.roomacoustic.audio.TestConfig
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AnalysisScreen(
@@ -35,26 +42,38 @@ fun AnalysisScreen(
     var sampleCount by remember { mutableIntStateOf(0) }
     var loadError by remember { mutableStateOf<String?>(null) }
 
+    var metrics by remember { mutableStateOf<AcousticMetrics?>(null) }
+
     val wavPath = latestRec?.filePath
+    // LaunchedEffect(wavPath) 내부: WAV 로드 후 metrics 계산 추가
     LaunchedEffect(wavPath) {
         specBmp = null
         loadError = null
         sr = 0
         sampleCount = 0
+        metrics = null // ★ 리셋
 
         if (wavPath.isNullOrBlank()) return@LaunchedEffect
         runCatching {
             val (pcm, sampleRate) = readMono16Wav(wavPath)
             sr = sampleRate
             sampleCount = pcm.size
+
+            // 스펙트로그램
             val spec = computeSpectrogram(pcm, sampleRate)
             specBmp = spectrogramToBitmap(spec)
+
+            // ★ RT60 / C50 / C80 계산 (TestConfig 기본값 가정)
+            val assumed = TestConfig(sampleRate = sampleRate) // fStart..tail은 기본값
+            metrics = computeAcousticMetrics(pcm, sampleRate, assumed)
         }.onFailure { e ->
             loadError = e.message ?: "WAV 로드 실패"
         }
     }
 
+
     Scaffold(
+        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
         topBar = {
             TopAppBar(
                 title = { Text("녹음 분석", fontWeight = FontWeight.SemiBold) },
@@ -153,6 +172,33 @@ fun AnalysisScreen(
                                 Text("RMS: ${"%.1f".format(latestRec?.rmsDbfs ?: 0f)} dBFS")
                                 Text("길이: ${"%.2f".format(latestRec?.durationSec ?: 0f)} s")
                             }
+                            // Peak/RMS/길이 표시 블록 '바로 아래'
+                            Spacer(Modifier.height(8.dp))
+
+                            metrics?.let { m ->
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        "RT60: " + (
+                                                m.rt60Sec?.let { String.format("%.2f s (%s)", it, m.tMethod ?: "") }
+                                                    ?: "계산 불가"
+                                                )
+                                    )
+                                    Text(
+                                        "C50: " + (
+                                                m.c50dB?.let { String.format("%.1f dB", it) } ?: "—"
+                                                )
+                                    )
+                                    Text(
+                                        "C80: " + (
+                                                m.c80dB?.let { String.format("%.1f dB", it) } ?: "—"
+                                                )
+                                    )
+                                }
+                            }
+
                         } ?: run {
                             CircularProgressIndicator()
                         }

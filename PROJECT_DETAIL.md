@@ -354,3 +354,34 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
     *   측정된 방의 물리적 특성과 음향 분석 결과를 종합하여, 사용자에게 최적의 스피커 배치, 흡음재/확산재 배치 등 구체적인 룸 어쿠스틱 개선 솔루션을 제안하는 기능 개발을 계획하고 있습니다.
 
 ---
+## 4. 리팩토링 내역
+
+### 4.1 25.11.04. 리팩토링
+
+#### 주요 기능 리팩토링 및 구조 개선
+
+-   **데이터 영구 저장 (Room 데이터베이스 도입)**
+    -   기존: 측정 데이터(방 크기, 스피커 위치 등)가 앱 실행 중에만 임시로 유지되었습니다.
+    -   변경: Room 데이터베이스를 도입하여 모든 측정 데이터를 영구적으로 저장하도록 변경했습니다.
+    -   이를 위해 `MeasureEntity`, `SpeakerEntity`, `RecordingEntity` 등 새로운 데이터 테이블과 이를 관리하는 `AnalysisRepository`가 추가되었습니다.
+
+-   **'결과 조회' 전용 화면 추가**
+    -   기존: 측정 플로우의 마지막 단계에서만 결과를 확인할 수 있었습니다.
+    -   변경: 메인 화면에서 이미 측정이 완료된 방의 결과를 언제든지 다시 볼 수 있는 '결과 조회' 플로우가 추가되었습니다.
+    -   `ResultRenderScreen.kt` (3D 결과)와 `ResultAnalysisScreen.kt` (음향 분석 결과) 화면이 새로 생성되었습니다.
+
+-   **전문 음향 분석 기능 추가**
+    -   `AcousticAnalysis.kt` 유틸리티가 추가되어, 녹음된 음향으로부터 다음과 같은 전문 지표를 계산하는 기능이 구현되었습니다.
+        -   **RT60 (잔향 시간)**: 공간의 울림 정도
+        -   **C50 / C80 (음성/음악 명료도)**: 소리의 선명도
+    -   이 값들은 분석 화면에 표시되어 사용자에게 더 깊이 있는 정보를 제공합니다.
+
+-   **코드 구조 개선 (UI 컴포넌트 분리)**
+    -   여러 화면에서 중복되던 3D 뷰포트 코드를 `RoomViewport3DGL.kt` 라는 재사용 가능한 컴포넌트로 분리하여 코드의 유지보수성과 효율성을 높였습니다.
+
+#### UI 버그 수정
+
+-   **시스템 바(상단 상태바, 하단 내비게이션 바) UI 겹침 문제 해결**
+    -   문제: 앱 콘텐츠가 시스템 바 뒤로 그려져 일부 UI가 가려지는 현상.
+    -   해결: `Modifier.windowInsetsPadding(WindowInsets.safeDrawing)`를 11개의 모든 화면 최상단 UI 요소에 적용하여, 콘텐츠가 시스템 UI를 피해 '안전 영역'에만 그려지도록 수정했습니다.
+    -   수정된 파일: `SplashScreen.kt`, `RoomScreen.kt`, `ChatScreen.kt`, `TwoPointMeasureScreen.kt`, `DetectSpeakerScreen.kt`, `RenderScreen.kt`, `TestGuideScreen.kt`, `KeepTestScreen.kt`, `AnalysisScreen.kt`, `ResultRenderScreen.kt`, `ResultAnalysisScreen.kt`

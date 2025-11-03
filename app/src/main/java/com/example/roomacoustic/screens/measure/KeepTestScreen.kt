@@ -18,6 +18,9 @@ import com.example.roomacoustic.viewmodel.RoomViewModel
 import kotlinx.coroutines.launch
 import java.io.File
 import com.example.roomacoustic.navigation.Screen
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 
 @Composable
 fun KeepTestScreen(
@@ -40,7 +43,7 @@ fun KeepTestScreen(
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
 
     // ✅ Surface로 전체를 감싸서 테마에 맞는 배경색과 글자색을 적용합니다.
-    Surface(modifier = Modifier.fillMaxSize()) {
+    Surface(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(
             // ✅ Modifier.fillMaxSize()는 Surface로 옮겨주고, 여기는 패딩만 남깁니다.
             Modifier.padding(16.dp),

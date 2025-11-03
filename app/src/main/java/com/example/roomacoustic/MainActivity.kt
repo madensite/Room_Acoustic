@@ -30,6 +30,8 @@ import com.example.roomacoustic.screens.measure.TestGuideScreen
 import com.example.roomacoustic.screens.measure.KeepTestScreen
 import com.example.roomacoustic.screens.measure.AnalysisScreen
 
+import com.example.roomacoustic.screens.result.ResultRenderScreen
+import com.example.roomacoustic.screens.result.ResultAnalysisScreen
 import com.example.roomacoustic.viewmodel.RoomViewModel
 
 class MainActivity : ComponentActivity() {
@@ -102,6 +104,22 @@ fun AppRoot() {
                     // val roomId = backStackEntry.arguments!!.getInt("roomId")
                     AnalysisScreen(nav, vm)
                 }
+            }
+
+            composable(
+                route = Screen.ResultRender.route, // "result/render/{roomId}"
+                arguments = listOf(navArgument("roomId") { type = NavType.IntType })
+            ) { backStackEntry ->
+                val roomId = backStackEntry.arguments!!.getInt("roomId")
+                ResultRenderScreen(nav = nav, vm = vm, roomId = roomId)
+            }
+
+            composable(
+                route = Screen.ResultAnalysis.route, // "result/analysis/{roomId}"
+                arguments = listOf(navArgument("roomId") { type = NavType.IntType })
+            ) { backStackEntry ->
+                val roomId = backStackEntry.arguments!!.getInt("roomId")
+                ResultAnalysisScreen(nav = nav, vm = vm, roomId = roomId)
             }
         }
     }

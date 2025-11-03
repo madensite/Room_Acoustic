@@ -24,6 +24,9 @@ import com.google.ar.core.Frame
 import com.google.ar.core.Session
 import io.github.sceneview.ar.ARSceneView
 import com.example.roomacoustic.model.Vec3
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 
 @Composable
 fun TwoPointMeasureScreen(
@@ -59,7 +62,11 @@ fun TwoPointMeasureScreen(
 
     /* ── UI ── */
     Box(
-        Modifier.fillMaxSize().background(Color.Black).wrapContentSize(Alignment.Center)
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .wrapContentSize(Alignment.Center)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
         AndroidView(
             factory = { sceneView },

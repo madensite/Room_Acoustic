@@ -88,6 +88,7 @@ fun RoomScreen(
 
     /* ───── 리스트 화면 ───── */
     Scaffold(
+        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
         floatingActionButton = {
 
             val fabSize = 56.dp          // 메인 FAB 크기
@@ -192,20 +193,30 @@ fun RoomScreen(
                     nav.navigate(Screen.MeasureGraph.route)
                 }
             } else {
-                SheetItem("측정 결과 보기") {
+                // ✅ 결과 보기 분리
+                SheetItem("3D 결과 보기") {
                     tappedRoom = null
-                    nav.navigate("${Screen.Render.route}?detected=true")
+                    nav.navigate(Screen.ResultRender.of(room.id)) {
+                        launchSingleTop = true
+                    }
+                }
+                SheetItem("녹음 분석 보기") {
+                    tappedRoom = null
+                    nav.navigate(Screen.ResultAnalysis.of(room.id)) {
+                        launchSingleTop = true
+                    }
                 }
             }
+
             if (!room.hasChat) {
                 SheetItem("새 대화") {
                     tappedRoom = null
-                    nav.navigate("${Screen.NewChat.route.replace("{roomId}", room.id.toString())}")
+                    nav.navigate(Screen.NewChat.route.replace("{roomId}", room.id.toString()))
                 }
             } else {
                 SheetItem("기존 대화 이어가기") {
                     tappedRoom = null
-                    nav.navigate("${Screen.ExChat.route.replace("{roomId}", room.id.toString())}")
+                    nav.navigate(Screen.ExChat.route.replace("{roomId}", room.id.toString()))
                 }
             }
         }

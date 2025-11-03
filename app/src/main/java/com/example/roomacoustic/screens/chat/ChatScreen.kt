@@ -25,6 +25,9 @@ import com.example.roomacoustic.viewmodel.ChatViewModel
 import com.example.roomacoustic.util.PromptLoader   // ⬅️ 추가
 import androidx.compose.runtime.remember            // 이미 있음
 import androidx.compose.ui.platform.LocalContext    // ⬅️ 추가
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 
 
 
@@ -48,6 +51,7 @@ fun ChatScreen(
 
 
     Scaffold(
+        modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
         topBar = {
             SmallTopAppBar(
                 title = { Text("") },

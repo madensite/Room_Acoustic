@@ -54,6 +54,9 @@ import com.example.roomacoustic.model.AxisFrame
 import com.example.roomacoustic.model.Measure3DResult
 import com.example.roomacoustic.model.Vec3 as MVec3
 import com.google.ar.core.TrackingState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 
 
 
@@ -99,6 +102,7 @@ fun DetectSpeakerScreen(nav: NavController, vm: RoomViewModel) {
                 .fillMaxSize()
                 .background(Color.Black)
                 .wrapContentSize(Alignment.Center)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
             AndroidView(
                 factory = { previewView },
@@ -278,8 +282,13 @@ fun DetectSpeakerScreen(nav: NavController, vm: RoomViewModel) {
         var basisSet by remember { mutableStateOf(false) } // 기준 프레임 1회만 세팅
 
         Box(
-            Modifier.fillMaxSize().background(Color.Black).wrapContentSize(Alignment.Center)
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .wrapContentSize(Alignment.Center)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
         ) {
+
             AndroidView(
                 factory = { sceneView },
                 modifier = Modifier

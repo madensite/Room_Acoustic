@@ -9,6 +9,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.example.roomacoustic.viewmodel.RoomViewModel
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 
 @Composable
 fun TestGuideScreen(
@@ -16,7 +19,7 @@ fun TestGuideScreen(
     vm: RoomViewModel
 ) {
     // Surface로 전체를 감싸 테마에 맞는 배경색과 글자색을 자동으로 적용합니다.
-    Surface(modifier = Modifier.fillMaxSize()) {
+    Surface(modifier = Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Column(
             // Modifier.fillMaxSize()는 부모인 Surface로 옮겨졌으므로
             // 여기서는 패딩만 적용해주는 것이 더 명확합니다.
