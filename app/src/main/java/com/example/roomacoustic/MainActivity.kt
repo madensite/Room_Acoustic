@@ -97,7 +97,7 @@ fun AppRoot() {
 
                 // ★ Analysis: roomId 인자를 선언해 주세요!
                 composable(
-                    route = Screen.Analysis.route, // "analysis/{roomId}"
+                    route = Screen.Analysis.route,
                     arguments = listOf(navArgument("roomId") { type = NavType.IntType })
                 ) { backStackEntry ->
                     // 필요 시 roomId 꺼내쓸 수도 있음
@@ -107,7 +107,7 @@ fun AppRoot() {
             }
 
             composable(
-                route = Screen.ResultRender.route, // "result/render/{roomId}"
+                route = Screen.ResultRender.route,
                 arguments = listOf(navArgument("roomId") { type = NavType.IntType })
             ) { backStackEntry ->
                 val roomId = backStackEntry.arguments!!.getInt("roomId")

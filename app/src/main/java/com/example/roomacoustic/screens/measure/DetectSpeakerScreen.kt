@@ -57,7 +57,7 @@ import com.google.ar.core.TrackingState
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
-
+import com.example.roomacoustic.navigation.Screen
 
 
 private enum class Phase { DETECT, MAP }
@@ -327,9 +327,10 @@ fun DetectSpeakerScreen(nav: NavController, vm: RoomViewModel) {
                         enabled = !isRunning,
                         onClick = {
                             val detected = vm.speakers.isNotEmpty()
-                            nav.navigate("Render?detected=$detected") {
-                                popUpTo("MeasureGraph") { inclusive = false }
+                            nav.navigate("${Screen.Render.route}?detected=$detected") {
+                                popUpTo(Screen.MeasureGraph.route) { inclusive = false }
                             }
+
                         }
                     ) { Text("렌더로 이동") }
                     OutlinedButton(onClick = {
@@ -404,16 +405,15 @@ fun DetectSpeakerScreen(nav: NavController, vm: RoomViewModel) {
                         } else null
 
                         fun commit(world: FloatArray) {
-                            val id = SimpleTracker.assignId(world)
-                            if (usedIds.add(id)) {
-                                if (i !in solvedCandidates) {
-                                    solvedCandidates = solvedCandidates + i   // 새 Set로 교체 → Compose 감지
-                                    solvedCount += 1
-                                    vm.upsertSpeaker(id, world, nowTs)
-                                    vm.pruneSpeakers(nowTs)
-                                }
+                            // 프레임간 어소시에이션 + EMA 스무딩이 ViewModel에서 처리됨
+                            vm.associateAndUpsert(world, nowTs)
+                            vm.pruneSpeakers(nowTs)   // 타임아웃 정리 (그대로 유지)
+                            if (i !in solvedCandidates) {
+                                solvedCandidates = solvedCandidates + i
+                                solvedCount += 1
                             }
                         }
+
 
                         if (depthMeters != null) {
                             val imgPts = FloatArray(2)

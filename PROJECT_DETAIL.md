@@ -385,3 +385,8 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
     -   문제: 앱 콘텐츠가 시스템 바 뒤로 그려져 일부 UI가 가려지는 현상.
     -   해결: `Modifier.windowInsetsPadding(WindowInsets.safeDrawing)`를 11개의 모든 화면 최상단 UI 요소에 적용하여, 콘텐츠가 시스템 UI를 피해 '안전 영역'에만 그려지도록 수정했습니다.
     -   수정된 파일: `SplashScreen.kt`, `RoomScreen.kt`, `ChatScreen.kt`, `TwoPointMeasureScreen.kt`, `DetectSpeakerScreen.kt`, `RenderScreen.kt`, `TestGuideScreen.kt`, `KeepTestScreen.kt`, `AnalysisScreen.kt`, `ResultRenderScreen.kt`, `ResultAnalysisScreen.kt`
+
+### 4.2 25.11.05. 리팩토링
+
+#### 코드 구조 리팩토링
+- **AR 추적 로직 안정화**: `RoomViewModel` 내 스피커 추적 로직을 개선했습니다. `associateAndUpsert` 함수를 새로 도입하여, 새로운 AR 프레임에서 탐지된 스피커 위치를 기존에 추적하던 스피커와 연관시킬 때 EMA(지수이동평균) 필터를 적용하도록 변경했습니다. 이를 통해 스피커 위치 값의 떨림(jitter) 현상을 줄여 추적 안정성을 높였습니다.

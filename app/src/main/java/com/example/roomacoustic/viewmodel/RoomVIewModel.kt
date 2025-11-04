@@ -94,11 +94,6 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         _speakersVersion.value = _speakersVersion.value + 1
     }
 
-    fun pruneSpeakers(frameNs: Long, timeoutSec: Int = 3) {
-        _speakers.removeAll { (frameNs - it.lastSeenNs) / 1e9 > timeoutSec }
-        _speakersVersion.value = _speakersVersion.value + 1
-    }
-
     // ───────── AR 6점 측정 결과 (기존) ─────────
     private val _measure3DResult = MutableStateFlow<Measure3DResult?>(null)
     val measure3DResult: StateFlow<Measure3DResult?> = _measure3DResult.asStateFlow()
@@ -162,4 +157,68 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
             val id = currentRoomId.value ?: return@launch
             analysisRepo.replaceSpeakers(id, worldPositions)
         }
+
+
+    // ====== [ADD] 프레임간 어소시에이션 + EMA 스무딩 파라미터 ======
+    private companion object {
+        // 프레임 간 같은 스피커로 본다고 판단할 최대 3D 거리(게이트)
+        const val GATE_3D_M = 0.25f        // 25cm 정도 (0.2~0.35 사이 튜닝 권장)
+        // 지수평활(EMA) 계수: 새 관측값을 얼마나 빠르게 따라갈지
+        const val EMA_ALPHA = 0.35f        // 0.2~0.5 구간에서 현장 튜닝
+        // 트랙 타임아웃: N초 이상 보이지 않으면 제거
+        const val TIMEOUT_SEC_DEFAULT = 3  // 기존 pruneSpeakers와 일치
+    }
+
+    private fun dist3(a: FloatArray, b: FloatArray): Float {
+        val dx = a[0] - b[0]; val dy = a[1] - b[1]; val dz = a[2] - b[2]
+        return kotlin.math.sqrt(dx*dx + dy*dy + dz*dz)
+    }
+
+    private fun emaUpdate(old: FloatArray, obs: FloatArray, alpha: Float = EMA_ALPHA): FloatArray {
+        // old <- alpha*obs + (1-alpha)*old
+        return floatArrayOf(
+            old[0] + alpha * (obs[0] - old[0]),
+            old[1] + alpha * (obs[1] - old[1]),
+            old[2] + alpha * (obs[2] - old[2])
+        )
+    }
+
+    /**
+     * 월드 좌표 한 점을 현재 트랙과 매칭해 스무딩 반영/신규 생성한다.
+     * - 가장 가까운 스피커가 GATE_3D_M 이내면 같은 트랙으로 간주하여 EMA 스무딩
+     * - 아니면 새 트랙 생성 (id는 SimpleTracker로 발급)
+     * - 변경 시 speakersVersion 증가
+     */
+    fun associateAndUpsert(world: FloatArray, nowNs: Long) {
+        // 1) 최근접 후보 찾기
+        var bestIdx = -1
+        var bestDist = Float.POSITIVE_INFINITY
+        for (i in _speakers.indices) {
+            val d = dist3(_speakers[i].worldPos, world)
+            if (d < bestDist) {
+                bestDist = d
+                bestIdx = i
+            }
+        }
+
+        if (bestIdx >= 0 && bestDist <= GATE_3D_M) {
+            // 2) 기존 트랙에 EMA 스무딩 반영
+            val s = _speakers[bestIdx]
+            s.worldPos = emaUpdate(s.worldPos, world)
+            s.lastSeenNs = nowNs
+        } else {
+            // 3) 신규 트랙 생성 (SimpleTracker로 id 할당)
+            val newId = com.example.roomacoustic.tracker.SimpleTracker.assignId(world)
+            _speakers.add(Speaker3D(newId, world.copyOf(), nowNs))
+        }
+        _speakersVersion.value = _speakersVersion.value + 1
+    }
+
+    /** 오래 안 보인 스피커 제거 (기존 함수 시그니처 유지) */
+    fun pruneSpeakers(frameNs: Long, timeoutSec: Int = TIMEOUT_SEC_DEFAULT) {
+        _speakers.removeAll { (frameNs - it.lastSeenNs) / 1e9 > timeoutSec }
+        _speakersVersion.value = _speakersVersion.value + 1
+    }
+
+
 }
