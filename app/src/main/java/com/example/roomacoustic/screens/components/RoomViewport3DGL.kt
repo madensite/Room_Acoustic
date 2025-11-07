@@ -146,23 +146,27 @@ class GLRoomRenderer : GLSurfaceView.Renderer {
         Matrix.multiplyMM(mvp, 0, proj, 0, mvp, 0)
         GLES20.glUniformMatrix4fv(uMVP, 1, false, mvp, 0)
 
-        // 반투명 면
-        GLES20.glUniform4f(uColor, 1f, 1f, 1f, 0.18f)
+        // ── (A) 반투명 면: 깊이 '읽기만', 쓰기 끔 ──
+        GLES20.glDepthMask(false)                       // ★ 깊이 쓰기 OFF
         GLES20.glEnableVertexAttribArray(aPos)
         GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, roomTriangles.toBuffer())
+        GLES20.glUniform4f(uColor, 1f, 1f, 1f, 0.18f)
         GLES20.glDrawArrays(GLES20.GL_TRIANGLES, 0, roomTriangles.size / 3)
 
+        // ── (B) 선/점: 깊이 쓰기 켜고 정상 렌더 ──
+        GLES20.glDepthMask(true)                        // ★ 깊이 쓰기 ON
+
         // 선
-        GLES20.glUniform4f(uColor, 1f, 1f, 1f, 0.65f)
         GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, roomEdges.toBuffer())
+        GLES20.glUniform4f(uColor, 1f, 1f, 1f, 0.65f)
         GLES20.glLineWidth(2f)
         GLES20.glDrawArrays(GLES20.GL_LINES, 0, roomEdges.size / 3)
 
-        // 스피커 점
+        // 점(스피커)
         if (speakers.isNotEmpty()) {
+            GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, speakers.toBuffer())
             GLES20.glUniform4f(uColor, 1f, 0.6f, 0.2f, 1f)
             GLES20.glUniform1f(uPointSize, 18f)
-            GLES20.glVertexAttribPointer(aPos, 3, GLES20.GL_FLOAT, false, 0, speakers.toBuffer())
             GLES20.glDrawArrays(GLES20.GL_POINTS, 0, speakers.size / 3)
         }
 
@@ -189,7 +193,12 @@ class GLRoomRenderer : GLSurfaceView.Renderer {
         this.yaw = yaw; this.pitch = pitch; this.zoom = zoom
     }
 
+    private var lastRoomForGeom: RoomSize? = null
+
     private fun ensureRoomGeometry(room: RoomSize) {
+        if (lastRoomForGeom == room && roomTriangles.isNotEmpty()) return
+        lastRoomForGeom = room
+
         if (roomTriangles.isNotEmpty()) return
         val hx = room.w * 0.5f
         val hy = room.h * 0.5f

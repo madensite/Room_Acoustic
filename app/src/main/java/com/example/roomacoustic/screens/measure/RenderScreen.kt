@@ -32,6 +32,9 @@ import com.example.roomacoustic.screens.components.RoomSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.runtime.saveable.Saver
 
 
 @Composable
@@ -56,10 +59,17 @@ fun RenderScreen(
     val bannerColor = if (detected) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.error
 
-    // 자동 추론 + 수동 입력 우선
+    // 🔹 수동 입력 값은 VM에서 방별로 꺼내 쓰기
+    val manualSizeMap = vm.manualRoomSize.collectAsState().value
+    val manualSpkMap  = vm.manualSpeakers.collectAsState().value
+    val manualSize    = manualSizeMap[roomId]
+    val manualSpks    = manualSpkMap[roomId]
+
+    // 자동 추론 RoomSize
     val autoRoomSize: RoomSize? = remember(labeled) { inferRoomSizeFromLabels(labeled) }
-    var manualRoomSize by rememberSaveable { mutableStateOf<RoomSize?>(null) }
-    val roomSize = manualRoomSize ?: autoRoomSize
+
+    // 🔹 수동 우선 룸 사이즈
+    val roomSize = manualSize ?: autoRoomSize
 
     // 월드→로컬(W, H, D) 변환
     val toLocal: (FloatArray) -> Vec3? = remember(frame3D) {
@@ -92,8 +102,14 @@ fun RenderScreen(
         else autoCenterToRoom(speakersLocalDedup, roomSize)
     }
 
+
     var showInput by rememberSaveable { mutableStateOf(false) }
     var showDetail by rememberSaveable { mutableStateOf(false) }
+
+    // 수동 입력으로 확정된 스피커들(로컬 좌표). null이면 자동 추론 사용.
+    var showSpeakerInput by rememberSaveable { mutableStateOf(false) }
+
+    val speakersForRender: List<Vec3> = manualSpks ?: speakersLocal
 
     Column(
         Modifier
@@ -108,21 +124,23 @@ fun RenderScreen(
                 .weight(1f)
         ) {
             if (roomSize != null) {
-                val clamped = speakersLocal.map { p ->
+                val clamped = speakersForRender.map { p ->   // ← speakersLocal → speakersForRender
                     Vec3(
                         x = p.x.coerceIn(0f, roomSize.w),
                         y = p.y.coerceIn(0f, roomSize.h),
                         z = p.z.coerceIn(0f, roomSize.d)
                     )
                 }
-                RoomViewport3DGL(
-                    room = roomSize,
-                    speakersLocal = clamped,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .fillMaxWidth()
-                        .aspectRatio(1.2f)
-                )
+                key(roomSize to clamped) {
+                    RoomViewport3DGL(
+                        room = roomSize,
+                        speakersLocal = clamped,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .fillMaxWidth()
+                            .aspectRatio(1.2f)
+                    )
+                }
             } else {
                 Text(
                     text = "방 크기(W/D/H)가 없어 3D 미리보기를 표시할 수 없습니다. (터치하여 직접 입력)",
@@ -159,8 +177,28 @@ fun RenderScreen(
             }
             Row {
                 TextButton(onClick = { showDetail = true }) { Text("상세정보") }
+
                 TextButton(onClick = { showInput = true }) { Text("직접 입력/편집") }
+
+                // 🔹 스피커 수동 입력 (roomSize 있어야 가능)
+                TextButton(
+                    onClick = { showSpeakerInput = true },
+                    enabled = roomSize != null
+                ) { Text("스피커 수동 입력") }
+
+                // 🔹 수동 스피커 해제
+                TextButton(
+                    onClick = { vm.clearManualSpeakers(roomId) },
+                    enabled = manualSpks != null
+                ) { Text("수동 스피커 해제") }
+
+                // 🔹 수동 RoomSize 해제 (있으면 노출하고 싶으면 추가)
+                TextButton(
+                    onClick = { vm.setManualRoomSize(roomId, null) },
+                    enabled = manualSize != null
+                ) { Text("수동 RoomSize 해제") }
             }
+
         }
 
         Spacer(Modifier.height(8.dp))
@@ -181,12 +219,19 @@ fun RenderScreen(
 
         /* 하단 우측 '다음' 버튼 */
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-            Button(onClick = { nav.navigate(Screen.TestGuide.route) }) { Text("다음") }
+            Button(onClick = { nav.navigate(Screen.RoomAnalysis.route) }) { Text("다음") }
         }
     }
 
     /* 상세정보 모달 */
     if (showDetail) {
+        val sizeTag = when {
+            manualSize != null     -> "[수동]"
+            autoRoomSize != null   -> "[자동]"
+            else                   -> "[미지정]"
+        }
+        val spkTag = if (manualSpks != null) "[수동]" else "[자동]"
+
         AlertDialog(
             onDismissRequest = { showDetail = false },
             title = { Text("상세정보") },
@@ -194,7 +239,9 @@ fun RenderScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("측정값")
                     if (labeled.isEmpty()) Text("저장된 길이 측정값이 없습니다.")
-                    else labeled.forEach { m -> Text("• ${m.label}: ${"%.2f".format(m.meters)} m") }
+                    else labeled.forEach { m ->
+                        Text("• ${m.label}: ${"%.2f".format(m.meters)} m")
+                    }
 
                     Spacer(Modifier.height(8.dp))
                     Text("프레임/좌표계")
@@ -202,34 +249,60 @@ fun RenderScreen(
                     else {
                         val f = frame3D.frame
                         Text("origin = (${fmt(f.origin.x)}, ${fmt(f.origin.y)}, ${fmt(f.origin.z)})")
-                        Text("vx = (${fmt(f.vx.x)}, ${fmt(f.vx.y)}, ${fmt(f.vx.z)})")
+                        Text("vx = (${fmt(f.vx.x)}, ${fmt(f.vy.y)}, ${fmt(f.vz.z)})")
                         Text("vy = (${fmt(f.vy.x)}, ${fmt(f.vy.y)}, ${fmt(f.vy.z)})")
                         Text("vz = (${fmt(f.vz.x)}, ${fmt(f.vz.y)}, ${fmt(f.vz.z)})")
                     }
 
                     Spacer(Modifier.height(8.dp))
-                    Text("스피커(로컬)")
-                    if (speakersLocal.isEmpty()) Text("감지된 스피커 없음")
-                    else speakersLocal.forEachIndexed { i, p ->
+                    // 🔹 RoomSize 출처
+                    Text("RoomSize $sizeTag")
+                    when (roomSize) {
+                        null -> Text("W/D/H 미지정")
+                        else -> Text("W ${"%.2f".format(roomSize.w)} · D ${"%.2f".format(roomSize.d)} · H ${"%.2f".format(roomSize.h)} (m)")
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    // 🔹 스피커 출처
+                    val listForInfo = speakersForRender
+                    Text("스피커(로컬) $spkTag")
+                    if (listForInfo.isEmpty()) Text("스피커 없음")
+                    else listForInfo.forEachIndexed { i, p ->
                         Text("• #${i + 1} (W,D,H)=(${fmt(p.x)}, ${fmt(p.z)}, ${fmt(p.y)}) m")
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showDetail = false }) { Text("닫기") } }
+            confirmButton = { TextButton({ showDetail = false }) { Text("닫기") } }
         )
     }
+
+
 
     /* 수동 입력 다이얼로그 */
     if (showInput) {
         RoomSizeInputDialog(
-            initial = manualRoomSize ?: autoRoomSize,
+            initial = manualSize ?: autoRoomSize,
             onDismiss = { showInput = false },
-            onConfirm = { w, d, h ->
-                manualRoomSize = RoomSize(w, d, h)
+            onConfirmMeters = { w, d, h ->
+                vm.setManualRoomSize(roomId, RoomSize(w, d, h)) // 🔹 VM에 m로 저장
                 showInput = false
             }
         )
     }
+
+    /* 스피커 수동 입력 다이얼로그 */
+    if (showSpeakerInput && roomSize != null) {
+        ManualSpeakersDialog(
+            room = roomSize, // (m)
+            onDismiss = { showSpeakerInput = false },
+            onConfirm = { list -> // list: List<Vec3> in meters
+                vm.setManualSpeakers(roomId, list) // 🔹 VM에 저장
+                showSpeakerInput = false
+            }
+        )
+    }
+
+
 }
 
 /* ──────────────────────────────────────────── */
@@ -263,57 +336,58 @@ private fun inferRoomSizeFromLabels(
 
 @Composable
 private fun RoomSizeInputDialog(
-    initial: RoomSize?,
+    initial: RoomSize?, // (m)
     onDismiss: () -> Unit,
-    onConfirm: (Float, Float, Float) -> Unit
+    onConfirmMeters: (Float, Float, Float) -> Unit // (m)로 콜백
 ) {
-    var wText by rememberSaveable { mutableStateOf(initial?.w?.toString() ?: "") }
-    var dText by rememberSaveable { mutableStateOf(initial?.d?.toString() ?: "") }
-    var hText by rememberSaveable { mutableStateOf(initial?.h?.toString() ?: "") }
+    // m → cm 초기 채우기
+    var wText by rememberSaveable { mutableStateOf(initial?.w?.times(100)?.roundToInt()?.toString() ?: "") }
+    var dText by rememberSaveable { mutableStateOf(initial?.d?.times(100)?.roundToInt()?.toString() ?: "") }
+    var hText by rememberSaveable { mutableStateOf(initial?.h?.times(100)?.roundToInt()?.toString() ?: "") }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("방 크기 직접 입력 (미터)") },
+        title = { Text("방 크기 직접 입력 (센티미터)") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
-                    value = wText, onValueChange = { wText = it },
-                    label = { Text("가로 W (m)") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions.Default.copy(
-                        keyboardType = KeyboardType.Number, imeAction = ImeAction.Next
-                    )
+                    value = wText, onValueChange = { if (it.isEmpty() || it.all(Char::isDigit)) wText = it },
+                    label = { Text("가로 W (cm)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
                 )
                 OutlinedTextField(
-                    value = dText, onValueChange = { dText = it },
-                    label = { Text("세로 D (m)") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions.Default.copy(
-                        keyboardType = KeyboardType.Number, imeAction = ImeAction.Next
-                    )
+                    value = dText, onValueChange = { if (it.isEmpty() || it.all(Char::isDigit)) dText = it },
+                    label = { Text("세로 D (cm)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next)
                 )
                 OutlinedTextField(
-                    value = hText, onValueChange = { hText = it },
-                    label = { Text("높이 H (m)") }, singleLine = true,
-                    keyboardOptions = KeyboardOptions.Default.copy(
-                        keyboardType = KeyboardType.Number, imeAction = ImeAction.Done
-                    )
+                    value = hText, onValueChange = { if (it.isEmpty() || it.all(Char::isDigit)) hText = it },
+                    label = { Text("높이 H (cm)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
                 )
                 if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error)
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                val w = wText.toFloatOrNull()
-                val d = dText.toFloatOrNull()
-                val h = hText.toFloatOrNull()
-                if (w == null || d == null || h == null || w <= 0 || d <= 0 || h <= 0) {
-                    error = "모든 값을 0보다 큰 숫자로 입력하세요."
-                } else onConfirm(w, d, h)
+                val wcm = wText.toIntOrNull()
+                val dcm = dText.toIntOrNull()
+                val hcm = hText.toIntOrNull()
+                if (wcm == null || dcm == null || hcm == null || wcm <= 0 || dcm <= 0 || hcm <= 0) {
+                    error = "모든 값을 0보다 큰 정수(cm)로 입력하세요."
+                } else {
+                    val w = wcm / 100f
+                    val d = dcm / 100f
+                    val h = hcm / 100f
+                    onConfirmMeters(w, d, h)
+                }
             }) { Text("확인") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } }
     )
 }
+
 
 /* ──────────────────────────────────────────── */
 /* 확장/수학 유틸                               */
@@ -350,3 +424,253 @@ private fun autoCenterToRoom(points: List<Vec3>, room: RoomSize): List<Vec3> {
     val tz = room.d * 0.5f - cz
     return points.map { Vec3(it.x + tx, it.y + ty, it.z + tz) }
 }
+
+@Composable
+private fun ManualSpeakersDialog(
+    room: RoomSize,
+    initialCount: Int = 2,
+    onDismiss: () -> Unit,
+    onConfirm: (List<Vec3>) -> Unit
+) {
+    var countText by rememberSaveable { mutableStateOf(initialCount.coerceIn(1, 8).toString()) }
+    val count = countText.toIntOrNull()?.coerceIn(1, 8) ?: 1
+
+    // ✅ Compose가 추적하는 상태로 정의 (mutableStateOf)
+    class RowState(
+        sideX: SideX = SideX.LEFT,  x: String = "",
+        sideZ: SideZ = SideZ.BACK,  z: String = "",
+        sideY: SideY = SideY.FLOOR, y: String = ""
+    ) {
+        var sideX by mutableStateOf(sideX)
+        var xCm   by mutableStateOf(x)
+        var sideZ by mutableStateOf(sideZ)
+        var zCm   by mutableStateOf(z)
+        var sideY by mutableStateOf(sideY)
+        var yCm   by mutableStateOf(y)
+    }
+
+    // ✅ 리스트 자체도 상태 리스트로 유지 (recomposition 시 값 보존)
+    val rows = remember { mutableStateListOf<RowState>() }
+    LaunchedEffect(count) {
+        while (rows.size < count) rows += RowState()
+        while (rows.size > count) rows.removeAt(rows.lastIndex)
+    }
+
+    val maxXcm = (room.w * 100).roundToInt()
+    val maxZcm = (room.d * 100).roundToInt()
+    val maxYcm = (room.h * 100).roundToInt()
+
+    var error by rememberSaveable { mutableStateOf<String?>(null) }
+
+    // ✅ 다이얼로그 컨텐츠 높이 제한 + 스크롤
+    val screenH = LocalConfiguration.current.screenHeightDp.dp
+    val dialogMaxH = screenH * 0.75f
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("스피커 수동 입력 (벽까지 거리, cm)") },
+        text = {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = dialogMaxH),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                contentPadding = PaddingValues(bottom = 8.dp)
+            ) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = countText,
+                            onValueChange = { s ->
+                                if (s.isEmpty() || s.all { it.isDigit() }) countText = s
+                            },
+                            label = { Text("개수") },
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Done
+                            ),
+                            modifier = Modifier.width(96.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("(1~8)")
+                    }
+                }
+
+                items(rows.size) { idx ->
+                    val r = rows[idx]
+                    Divider()
+                    Text("스피커 #${idx + 1}", style = MaterialTheme.typography.titleSmall)
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SegmentedButtonsX(selected = r.sideX, onSelect = { r.sideX = it })
+                        NumberField(
+                            value = r.xCm,
+                            onValueChange = { r.xCm = it },
+                            label = if (r.sideX == SideX.LEFT) "좌측까지(cm)" else "우측까지(cm)",
+                            supporting = "0~$maxXcm",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SegmentedButtonsZ(selected = r.sideZ, onSelect = { r.sideZ = it })
+                        NumberField(
+                            value = r.zCm,
+                            onValueChange = { r.zCm = it },
+                            label = if (r.sideZ == SideZ.FRONT) "전면까지(cm)" else "후면까지(cm)",
+                            supporting = "0~$maxZcm",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        SegmentedButtonsY(selected = r.sideY, onSelect = { r.sideY = it })
+                        NumberField(
+                            value = r.yCm,
+                            onValueChange = { r.yCm = it },
+                            label = if (r.sideY == SideY.FLOOR) "바닥까지(cm)" else "천장까지(cm)",
+                            supporting = "0~$maxYcm",
+                            ime = ImeAction.Done,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                if (error != null) {
+                    item { Text(error!!, color = MaterialTheme.colorScheme.error) }
+                }
+                item {
+                    Text(
+                        "한쪽만 입력하세요. 선택한 면까지의 거리(cm)만 입력하면 반대편은 자동으로 계산됩니다.",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+        confirmButton = {
+            TextButton(onClick = {
+                val out = mutableListOf<Vec3>()
+                for (r in rows) {
+                    val xcm = r.xCm.toIntOrNull()
+                    val zcm = r.zCm.toIntOrNull()
+                    val ycm = r.yCm.toIntOrNull()
+                    if (xcm == null || zcm == null || ycm == null) {
+                        error = "모든 거리를 숫자로 입력하세요."
+                        return@TextButton
+                    }
+                    if (xcm !in 0..maxXcm || zcm !in 0..maxZcm || ycm !in 0..maxYcm) {
+                        error = "범위를 벗어난 값이 있습니다."
+                        return@TextButton
+                    }
+
+                    // cm → m 변환 + 선택한 면 기준으로 좌표 환산
+                    val x = if (r.sideX == SideX.LEFT)  xcm/100f else room.w - xcm/100f
+                    val z = if (r.sideZ == SideZ.FRONT) zcm/100f else room.d - zcm/100f
+                    val y = if (r.sideY == SideY.FLOOR) ycm/100f else room.h - ycm/100f
+
+                    out += Vec3(
+                        x.coerceIn(0f, room.w),
+                        y.coerceIn(0f, room.h),
+                        z.coerceIn(0f, room.d)
+                    )
+                }
+                error = null
+                onConfirm(out)
+            }) { Text("확인") }
+        }
+    )
+}
+
+/** 숫자 전용 TextField (정수 cm) */
+@Composable
+private fun NumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    supporting: String,
+    ime: ImeAction = ImeAction.Next,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { s ->
+            // 숫자 + 빈 문자열 허용(지우기 가능)
+            if (s.isEmpty() || s.all { it.isDigit() }) onValueChange(s)
+        },
+        label = { Text(label) },
+        supportingText = { Text(supporting) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ime
+        ),
+        modifier = modifier
+    )
+}
+
+private enum class SideX { LEFT, RIGHT }
+private enum class SideZ { FRONT, BACK }
+private enum class SideY { FLOOR, CEILING }
+
+
+@Composable private fun SegmentedButtonsX(selected: SideX, onSelect: (SideX) -> Unit) {
+    SegmentedRow(
+        items = listOf("좌측 L" to SideX.LEFT, "우측 R" to SideX.RIGHT),
+        selected = selected, onSelect = onSelect
+    )
+}
+@Composable private fun SegmentedButtonsZ(selected: SideZ, onSelect: (SideZ) -> Unit) {
+    SegmentedRow(
+        items = listOf("전면 F" to SideZ.FRONT, "후면 B" to SideZ.BACK),
+        selected = selected, onSelect = onSelect
+    )
+}
+@Composable private fun SegmentedButtonsY(selected: SideY, onSelect: (SideY) -> Unit) {
+    SegmentedRow(
+        items = listOf("바닥" to SideY.FLOOR, "천장" to SideY.CEILING),
+        selected = selected, onSelect = onSelect
+    )
+}
+
+@Composable
+private fun <T> SegmentedRow(
+    items: List<Pair<String, T>>,
+    selected: T,
+    onSelect: (T) -> Unit
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items.forEach { (label, value) ->
+            FilterChip(
+                selected = selected == value,
+                onClick = { onSelect(value) },
+                label = { Text(label) }
+            )
+        }
+    }
+}
+
+@Composable
+private fun NumberField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    supporting: String,
+    modifier: Modifier = Modifier
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { s ->
+            if (s.isEmpty() || s.all { it.isDigit() }) onValueChange(s)
+        },
+        label = { Text(label) },
+        supportingText = { Text(supporting) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ImeAction.Next
+        ),
+        modifier = modifier   // ✅ weight 제거
+    )
+}
+
+

@@ -13,6 +13,30 @@ data class Vec3(val x: Float, val y: Float, val z: Float) {
     }
 }
 
+/* 🔹 추가: 상면(Top-Down) 평가/선택용 2D 좌표 (x, z) */
+data class Vec2(val x: Float, val z: Float) {
+    operator fun plus(o: Vec2) = Vec2(x + o.x, z + o.z)
+    operator fun minus(o: Vec2) = Vec2(x - o.x, z - o.z)
+    operator fun times(s: Float) = Vec2(x * s, z * s)
+    fun length() = kotlin.math.sqrt((x * x + z * z).toDouble()).toFloat()
+}
+
+// 청취자 위치(상면 투영, 단위 m)
+data class Listener2D(val x: Float, val z: Float)
+
+// 스피커-청취자 배치 품질 간단 평가
+data class LayoutEval(
+    val avgDist: Float?,          // 평균 거리 (m)
+    val lDist: Float?,            // 좌 스피커 거리 (m) - 2ch일 때
+    val rDist: Float?,            // 우 스피커 거리 (m) - 2ch일 때
+    val distanceDelta: Float?,    // |L-R| (m)
+    val toeInDeg: Float?,         // 스피커→청취자 각도 권장치(°)  (간단 추정)
+    val sweetSpotScore: Float,    // 0~100
+    val notes: List<String>       // 개선 제안 메시지
+)
+
+
+
 enum class MeasurePickStep(val label: String) {
     PickXMin("X- (왼쪽 벽을 탭)"),
     PickXMax("X+ (오른쪽 벽을 탭)"),

@@ -14,12 +14,11 @@ import com.example.roomacoustic.screens.components.RoomViewport3DGL
 import com.example.roomacoustic.screens.components.RoomSize
 import com.example.roomacoustic.viewmodel.RoomViewModel
 import com.example.roomacoustic.model.Vec3
-import kotlin.math.sqrt
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.ui.graphics.Color
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -28,55 +27,88 @@ fun ResultRenderScreen(
     vm: RoomViewModel,
     roomId: Int
 ) {
-    // ViewModel에서 동일 소스 재사용
-    val labeled = vm.labeledMeasures.collectAsState().value
+    // ── 공통 소스
+    val labeled  = vm.labeledMeasures.collectAsState().value
     val frame3D  = vm.measure3DResult.collectAsState().value
 
     val speakersVersion = vm.speakersVersion.collectAsState(0).value
-    val speakers = remember(speakersVersion) { vm.speakers.toList() }
+    val speakersAutoWorld = remember(speakersVersion) { vm.speakers.toList() }
 
-    val autoRoomSize = remember(labeled) { inferRoomSizeFromLabels(labeled) }
-    val roomSize = autoRoomSize
+    // 방 제목
+    val rooms = vm.rooms.collectAsState().value
+    val roomTitle by remember(rooms, roomId) {
+        mutableStateOf(rooms.firstOrNull { it.id == roomId }?.title ?: "Room #$roomId")
+    }
 
-    // 월드→로컬
+    // ── 수동 입력(방별) 구독
+    val manualSizeMap = vm.manualRoomSize.collectAsState().value    // Map<Int, RoomSize>
+    val manualSpkMap  = vm.manualSpeakers.collectAsState().value    // Map<Int, List<Vec3>>
+    val manualSize    = manualSizeMap[roomId]       // 수동 RoomSize (m)
+    val manualSpks    = manualSpkMap[roomId]        // 수동 Speaker (local, m)
+
+    // 자동 RoomSize 추론 (레이블)
+    val autoRoomSize: RoomSize? = remember(labeled) { inferRoomSizeFromLabels(labeled) }
+
+    // 최종 RoomSize: 수동 우선
+    val roomSize = manualSize ?: autoRoomSize
+
+    // 월드 → 로컬 (자동 탐지용 변환기) : 수동 스피커는 이미 로컬이므로 변환 불필요
     val toLocal: (FloatArray) -> Vec3? = remember(frame3D) {
         { p ->
             frame3D?.let { m ->
-                val o = m.frame.origin; val vx = m.frame.vx; val vy = m.frame.vy; val vz = m.frame.vz
+                val o = m.frame.origin
+                val vx = m.frame.vx
+                val vy = m.frame.vy
+                val vz = m.frame.vz
                 val d = Vec3(p[0], p[1], p[2]) - o
-                Vec3(d.x*vx.x + d.y*vx.y + d.z*vx.z,
-                    d.x*vy.x + d.y*vy.y + d.z*vy.z,
-                    d.x*vz.x + d.y*vz.y + d.z*vz.z)
+                Vec3(
+                    d.x * vx.x + d.y * vx.y + d.z * vx.z,
+                    d.x * vy.x + d.y * vy.y + d.z * vy.z,
+                    d.x * vz.x + d.y * vz.y + d.z * vz.z
+                )
             }
         }
     }
-    val speakersLocal = remember(speakers, frame3D) { speakers.mapNotNull { toLocal(it.worldPos) } }
+
+    // 자동 스피커: 월드→로컬 (frame3D 없으면 빈 리스트)
+    val speakersLocalAuto = remember(speakersAutoWorld, frame3D) {
+        if (frame3D == null) emptyList()
+        else speakersAutoWorld.mapNotNull { toLocal(it.worldPos) }
+    }
+
+    // 최종 스피커: 수동(로컬) 우선, 없으면 자동(로컬)
+    val speakersForRender = manualSpks ?: speakersLocalAuto
+
+    // 출처 태그
+    val sizeTag = when {
+        manualSize != null   -> "[수동]"
+        autoRoomSize != null -> "[자동]"
+        else                 -> "[미지정]"
+    }
+    val spkTag  = if (manualSpks != null) "[수동]" else "[자동]"
 
     Scaffold(
         modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
         topBar = {
             TopAppBar(
                 title = { Text("3D 결과", fontWeight = FontWeight.SemiBold) },
-
-                // ← 뒤로: 스택에 Room이 있으면 pop으로 바로 복귀
                 navigationIcon = {
                     IconButton(onClick = {
                         val ok = nav.popBackStack(Screen.Room.route, false)
                         if (!ok) {
-                            // Room이 스택에 없으면 새로 진입
                             nav.navigate(Screen.Room.route) {
                                 launchSingleTop = true
                                 restoreState = true
                                 popUpTo(Screen.Room.route) { inclusive = false }
                             }
                         }
-                    }) { Icon(
-                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "뒤로"
-                    ) }
+                    }) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "뒤로"
+                        )
+                    }
                 },
-
-                // “방 선택으로”만 남기고 “분석 보기” 제거
                 actions = {
                     TextButton(onClick = {
                         val ok = nav.popBackStack(Screen.Room.route, false)
@@ -93,38 +125,65 @@ fun ResultRenderScreen(
         }
     ) { pad ->
         Column(
-            modifier = Modifier.padding(pad).fillMaxSize().padding(16.dp)
+            modifier = Modifier
+                .padding(pad)
+                .fillMaxSize()
+                .padding(16.dp)
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Room #$roomId")
+                Text(roomTitle)
                 TextButton(onClick = { nav.popBackStack() }) { Text("뒤로") }
             }
+
             Spacer(Modifier.height(8.dp))
+
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    text = roomSize?.let { "W %.2f · D %.2f · H %.2f (m)".format(it.w, it.d, it.h) }
-                        ?: "측정값 없음"
+                    text = roomSize?.let {
+                        "W %.2f · D %.2f · H %.2f (m) %s".format(it.w, it.d, it.h, sizeTag)
+                    } ?: "측정값 없음 $sizeTag"
                 )
-                Text("스피커: ${speakersLocal.size}개")
+                Text("스피커: ${speakersForRender.size}개 $spkTag")
             }
+
             Spacer(Modifier.height(12.dp))
 
             if (roomSize != null) {
+                // 안전 클램핑
+                val clamped = remember(speakersForRender, roomSize) {
+                    speakersForRender.map { p ->
+                        Vec3(
+                            x = p.x.coerceIn(0f, roomSize.w),
+                            y = p.y.coerceIn(0f, roomSize.h),
+                            z = p.z.coerceIn(0f, roomSize.d)
+                        )
+                    }
+                }
+
                 RoomViewport3DGL(
                     room = roomSize,
-                    speakersLocal = speakersLocal,
-                    modifier = Modifier.fillMaxWidth().weight(1f).aspectRatio(1.2f)
+                    speakersLocal = clamped,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .aspectRatio(1.2f)
                 )
             } else {
-                Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                    Text("방 크기가 없어 3D 미리보기를 표시할 수 없습니다.", color = MaterialTheme.colorScheme.error)
+                Box(
+                    Modifier.fillMaxWidth().weight(1f),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        "방 크기가 없어 3D 미리보기를 표시할 수 없습니다.",
+                        color = MaterialTheme.colorScheme.error
+                    )
                 }
             }
         }
     }
 }
 
-/* RenderScreen에 있던 레이블→치수 추론 함수 (그대로 복붙) */
+/* RenderScreen과 동일한 치수 추론 함수 */
 private fun normalizeLabel(s: String): String =
     s.lowercase().replace("\\s+".toRegex(), "")
         .replace("[()\\[\\]{}:：=~_\\-]".toRegex(), "")

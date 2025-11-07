@@ -263,6 +263,7 @@ fun RoomScreen(
                 vm.setMeasure(room.id, false)
                 longPressedRoom = null
                 vm.clearMeasureAndSpeakers()
+                vm.clearManualFor(room.id)
                 nav.navigate(Screen.MeasureGraph.route)
             }
             SheetItem("대화 초기화") {

@@ -14,16 +14,20 @@ sealed class Screen(val route: String) {
     /** 서브그래프 진입 가상 라우트 */
     object MeasureGraph : Screen("measureGraph")
 
+    /** 🔹 카메라 안내/분기 */
+    object CameraGuide : Screen("cameraGuide")
+
     /** 단계별 측정 */
     object MeasureWidth   : Screen("measureWidth")     // ① 폭
     object MeasureDepth   : Screen("measureDepth")     // ② 깊이
     object MeasureHeight  : Screen("measureHeight")    // ③ 높이
     object DetectSpeaker  : Screen("detectSpeaker")    // ④ 스피커 탐지
 
-    /** 측정 플로우 내부 후속 화면(기존 유지) */
-    object Render    : Screen("render")                // (플로우 중간 시각화)
-    object TestGuide : Screen("testGuide")             // 녹음 가이드
-    object KeepTest  : Screen("keepTest")              // 녹음 진행
+    /** 측정 플로우 내부 후속 화면 */
+    object Render         : Screen("render")           // 중간 3D 시각화
+    object RoomAnalysis   : Screen("roomAnalysis")     // ✅ Top-down 평면 분석 & 청취 위치 선택
+    object TestGuide      : Screen("testGuide")        // 녹음 가이드
+    object KeepTest       : Screen("keepTest")         // 녹음 진행
 
     /** (기존) 분석: 측정 플로우와 독립적으로 이미 사용 중 */
     object Analysis  : Screen("analysis/{roomId}") {

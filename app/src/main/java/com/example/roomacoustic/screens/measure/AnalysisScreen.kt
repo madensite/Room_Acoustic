@@ -44,6 +44,13 @@ fun AnalysisScreen(
 
     var metrics by remember { mutableStateOf<AcousticMetrics?>(null) }
 
+    // 1) 방 목록 가져오기
+    val rooms = vm.rooms.collectAsState().value
+
+    // 2) roomId로 제목 찾기 (없으면 fallback)
+    val roomTitle by remember(rooms, roomId) {
+        mutableStateOf(rooms.firstOrNull { it.id == roomId }?.title ?: "Room #$roomId")
+    }
     val wavPath = latestRec?.filePath
     // LaunchedEffect(wavPath) 내부: WAV 로드 후 metrics 계산 추가
     LaunchedEffect(wavPath) {
@@ -100,7 +107,7 @@ fun AnalysisScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = if (roomId != null) "Room #$roomId" else "Room 미선택",
+                        roomTitle,
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

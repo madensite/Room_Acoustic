@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.roomacoustic.data.*
+import com.example.roomacoustic.model.LayoutEval
+import com.example.roomacoustic.model.Listener2D
 import com.example.roomacoustic.model.Speaker3D
 import com.example.roomacoustic.repo.RoomRepository
 import com.example.roomacoustic.repo.AnalysisRepository
@@ -13,6 +15,12 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import com.example.roomacoustic.model.Vec3
 import com.example.roomacoustic.model.Measure3DResult
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import com.example.roomacoustic.screens.components.RoomSize
+import com.example.roomacoustic.model.Vec2
+import kotlinx.coroutines.flow.update
 
 class RoomViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -76,6 +84,9 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
     fun deleteAllRooms() = viewModelScope.launch {
         repo.deleteAll()
         currentRoomId.value = null
+        // ★ 수동 입력들도 모두 초기화
+        _manualSpeakers.value = emptyMap()
+        _manualRoomSize.value  = emptyMap()
     }
 
     // ── 스피커 변경 버전 카운터 (Render 재구성 트리거)
@@ -219,6 +230,173 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         _speakers.removeAll { (frameNs - it.lastSeenNs) / 1e9 > timeoutSec }
         _speakersVersion.value = _speakersVersion.value + 1
     }
+
+    // 방별 수동 스피커 좌표 (로컬 좌표, m)
+    private val _manualSpeakers = MutableStateFlow<Map<Int, List<Vec3>>>(emptyMap())
+    val manualSpeakers: StateFlow<Map<Int, List<Vec3>>> = _manualSpeakers.asStateFlow()
+
+    fun setManualSpeakers(roomId: Int, list: List<Vec3>?) {
+        _manualSpeakers.value =
+            if (list == null) _manualSpeakers.value - roomId
+            else _manualSpeakers.value + (roomId to list)
+    }
+
+    fun manualSpeakersFor(roomId: Int): List<Vec3>? = _manualSpeakers.value[roomId]
+
+    fun clearManualSpeakers(roomId: Int) {
+        _manualSpeakers.value = _manualSpeakers.value - roomId
+    }
+
+
+    // ───── 수동 RoomSize (roomId -> RoomSize(m)) ─────
+    private val _manualRoomSize = MutableStateFlow<Map<Int, RoomSize>>(emptyMap())
+    val manualRoomSize: StateFlow<Map<Int, RoomSize>> = _manualRoomSize.asStateFlow()
+
+    /** 방별 수동 RoomSize 설정/해제 (m 단위) */
+    fun setManualRoomSize(roomId: Int, size: RoomSize?) {
+        _manualRoomSize.value =
+            if (size == null) _manualRoomSize.value - roomId
+            else _manualRoomSize.value + (roomId to size)
+    }
+
+    /** 방별 수동 RoomSize 조회 */
+    fun manualRoomSizeFor(roomId: Int): RoomSize? = _manualRoomSize.value[roomId]
+
+    /** 방별 수동 RoomSize 제거 */
+    fun clearManualRoomSize(roomId: Int) {
+        _manualRoomSize.value = _manualRoomSize.value - roomId
+    }
+
+    /** 방별 수동 입력 전체 초기화(스피커 + RoomSize 동시 제거) */
+    fun clearManualFor(roomId: Int) {
+        _manualSpeakers.value = _manualSpeakers.value - roomId
+        _manualRoomSize.value = _manualRoomSize.value - roomId
+    }
+
+    // 방별 청취 위치 (x,z)
+    private val _manualListener = MutableStateFlow<Map<Int, Vec2>>(emptyMap())
+    val manualListener: StateFlow<Map<Int, Vec2>> = _manualListener
+
+    fun setManualListener(roomId: Int, p: Vec2?) {
+        _manualListener.update { old ->
+            val next = old.toMutableMap()
+            if (p == null) next.remove(roomId) else next[roomId] = p
+            next
+        }
+    }
+
+    // ① 방별 청취자 위치
+    private val _listener2D = MutableStateFlow<Map<Int, Listener2D>>(emptyMap())
+    val listener2D: StateFlow<Map<Int, Listener2D>> = _listener2D
+
+    fun setListener2D(roomId: Int, p: Listener2D?) {
+        _listener2D.update { m ->
+            if (p == null) m - roomId else m + (roomId to p)
+        }
+    }
+
+    // room: RoomSize (m), speakersLocal: List<Vec3> (m, y는 무시), listener: Listener2D (m)
+    fun evaluateLayout2ch(
+        room: com.example.roomacoustic.screens.components.RoomSize,
+        speakersLocal: List<Vec3>,
+        listener: Listener2D
+    ): LayoutEval {
+
+        if (speakersLocal.isEmpty()) {
+            return LayoutEval(null, null, null, null, null, 0f, listOf("스피커가 없습니다. 최소 1개를 지정하세요."))
+        }
+
+        // 상면 투영
+        val pts = speakersLocal.map { it.copy(y = 0f) }
+        val L: Vec3? = pts.getOrNull(0)
+        val R: Vec3? = pts.getOrNull(1)
+
+        // 거리 계산
+        fun distXZ(a: Vec3, x: Float, z: Float): Float {
+            val dx = a.x - x; val dz = a.z - z
+            return kotlin.math.sqrt(dx*dx + dz*dz)
+        }
+
+        val lDist = L?.let { distXZ(it, listener.x, listener.z) }
+        val rDist = R?.let { distXZ(it, listener.x, listener.z) }
+        val avgDist = listOfNotNull(lDist, rDist).takeIf { it.isNotEmpty() }?.average()?.toFloat()
+
+        // 좌우 거리 차이
+        val distanceDelta = if (lDist != null && rDist != null) kotlin.math.abs(lDist - rDist) else null
+
+        // 60° 등가 삼각형 기준 간단 점수 (너무 빡세지 않게 가중치)
+        // 목표: 좌우거리 유사, 벽에서 너무 가깝지 않음, 등가삼각형(스피커 간 거리와 청취 거리 비율 ~1:1~1:1.2)
+        val notes = mutableListOf<String>()
+        var score = 100f
+
+        // 벽에서 최소 여유 20cm 권장
+        fun marginOK(x: Float, z: Float): Boolean =
+            x >= 0.20f && z >= 0.20f && (room.w - x) >= 0.20f && (room.d - z) >= 0.20f
+
+        if (!marginOK(listener.x, listener.z)) {
+            notes += "청취 위치를 벽에서 20cm 이상 띄우면 반사 영향이 줄어듭니다."
+            score -= 10
+        }
+
+        if (speakersLocal.size >= 2 && L != null && R != null) {
+            val speakerGap = kotlin.math.abs(L.x - R.x).coerceAtLeast(0.001f)
+            if (avgDist != null) {
+                val ratio = avgDist / speakerGap
+                // 1.0 ~ 1.2 대역을 sweet로 간주
+                val sweet = when {
+                    ratio < 0.8f -> { notes += "청취자가 스피커에 너무 가깝습니다. 약간 뒤로 이동해 보세요."; 15 }
+                    ratio > 1.3f -> { notes += "청취자가 너무 뒤에 있습니다. 조금 앞으로 이동해 보세요."; 15 }
+                    else -> 0
+                }
+                score -= sweet
+            }
+            if (distanceDelta != null) {
+                when {
+                    distanceDelta > 0.40f -> { notes += "좌/우 거리 차이가 큽니다(>40cm). 중심선에 가깝게 이동하세요."; score -= 25 }
+                    distanceDelta > 0.20f -> { notes += "좌/우 거리 차이가 다소 큽니다(>20cm). 약간 중심으로 이동하세요."; score -= 10 }
+                }
+            }
+
+            // 간단 Toe-in 권장치: 스피커→청취자 벡터를 기준으로 yaw 추정
+            fun toeInDeg(spk: Vec3, lis: Listener2D): Float {
+                val vx = lis.x - spk.x
+                val vz = lis.z - spk.z
+                val ang = Math.toDegrees(kotlin.math.atan2(vx.toDouble(), vz.toDouble())).toFloat()
+                // 0°가 전면(+Z) 바라봄이라고 보면 좌우 각각 ± 로 나옴 → 절대각으로 5~15° 추천
+                return kotlin.math.abs(ang)
+            }
+            val toeL = L?.let { toeInDeg(it, listener) }
+            val toeR = R?.let { toeInDeg(it, listener) }
+            val toeAvg = listOfNotNull(toeL, toeR).takeIf { it.isNotEmpty() }?.average()?.toFloat()
+
+            toeAvg?.let { t ->
+                if (t < 3f) notes += "스피커를 청취자 쪽으로 약간 Toe-in(5~15°) 해보세요."
+                else if (t > 25f) notes += "Toe-in 각도가 크면 스테이징이 좁아질 수 있어요. 5~15° 권장."
+            }
+
+            return LayoutEval(
+                avgDist = avgDist,
+                lDist = lDist,
+                rDist = rDist,
+                distanceDelta = distanceDelta,
+                toeInDeg = toeAvg,
+                sweetSpotScore = score.coerceIn(0f, 100f),
+                notes = notes
+            )
+        }
+
+        // 모노/1ch 등: 기본 메시지
+        return LayoutEval(
+            avgDist = avgDist,
+            lDist = lDist,
+            rDist = rDist,
+            distanceDelta = distanceDelta,
+            toeInDeg = null,
+            sweetSpotScore = score.coerceIn(0f, 100f),
+            notes = notes.ifEmpty { listOf("스피커가 2개가 아니라면 좌우 대칭 기준은 생략됩니다.") }
+        )
+    }
+
 
 
 }

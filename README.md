@@ -166,6 +166,11 @@ OPENAI_API_KEY="YOUR_API_KEY_HERE"
 *   **내비게이션 안정성 강화**: 결과 조회 화면에서 '뒤로 가기' 시 화면 흐름이 깨지지 않도록 내비게이션 로직을 수정했습니다.
 *   **코드 구조 리팩토링**: AR 스피커 추적 시 `associateAndUpsert` 함수를 새로 도입하여, EMA 필터를 적용하였습니다. 이를 통해 스피커 위치 값의 떨림(jitter) 현상을 줄여 추적 안정성을 높였습니다.
 
+### 25.11.07
+*   **신규 화면 대거 추가**: `CameraGuideScreen`, `RoomAnalysisScreen`, `ResultAnalysisScreen`, `ResultRenderScreen`을 추가하여 사용자 경험과 분석 기능을 대폭 강화했습니다.
+*   **수동 스피커 등록 기능**: `RenderScreen`에서 사용자가 직접 스피커 위치를 등록하고 편집할 수 있는 기능을 추가하여 측정 유연성을 높였습니다.
+*   **네비게이션 흐름 개선**: 측정 시작 시 `CameraGuideScreen`을 통해 자동/수동 측정 옵션을 제공하고, `RoomAnalysisScreen`을 측정 플로우에 통합하여 분석 단계를 강화하는 등 전체적인 화면 흐름을 개선했습니다.
+
 
 ## 📌 참고 이미지 (추후 추가 예정)
 

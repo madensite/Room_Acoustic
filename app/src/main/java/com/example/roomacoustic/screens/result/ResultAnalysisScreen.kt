@@ -21,6 +21,7 @@ import com.example.roomacoustic.util.computeAcousticMetrics
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import com.example.roomacoustic.screens.components.RoomSize
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -38,6 +39,37 @@ fun ResultAnalysisScreen(
     var sampleCount by remember { mutableIntStateOf(0) }
     var loadError by remember { mutableStateOf<String?>(null) }
     var metrics by remember { mutableStateOf<AcousticMetrics?>(null) }
+
+    // 1) 방 목록 가져오기
+    val rooms = vm.rooms.collectAsState().value
+
+    // 2) roomId로 제목 찾기 (없으면 fallback)
+    val roomTitle by remember(rooms, roomId) {
+        mutableStateOf(rooms.firstOrNull { it.id == roomId }?.title ?: "Room #$roomId")
+    }
+
+    // 상단 state 구역 어딘가에 추가
+    val manualSizeMap = vm.manualRoomSize.collectAsState().value
+    val manualSize    = manualSizeMap[roomId]
+
+    // 기존 auto(DB) 값
+    val autoSize = latestMeasure?.let { RoomSize(it.width, it.depth, it.height) }
+
+    // 수동 우선
+    val roomSize = manualSize ?: autoSize
+    val sizeTag  = when {
+        manualSize != null -> "[수동]"
+        autoSize   != null -> "[자동(DB)]"
+        else               -> "[미지정]"
+    }
+
+    // 상단 state 구역에 함께 추가
+    val manualSpkMap = vm.manualSpeakers.collectAsState().value
+    val manualSpks   = manualSpkMap[roomId]          // 로컬 좌표(m), 수동 입력
+
+    // 표시할 개수: 수동 우선, 없으면 DB 저장 개수
+    val speakerCount = manualSpks?.size ?: savedSpeakers.size
+    val spkTag = if (manualSpks != null) "[수동]" else "[자동(DB)]"
 
     val wavPath = latestRec?.filePath
     LaunchedEffect(wavPath) {
@@ -96,17 +128,17 @@ fun ResultAnalysisScreen(
             modifier = Modifier.padding(inner).fillMaxSize().padding(16.dp)
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("Room #$roomId")
+                Text(roomTitle)
                 TextButton(onClick = { nav.popBackStack() }) { Text("뒤로") }
             }
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    text = latestMeasure?.let {
-                        "W %.2f · D %.2f · H %.2f (m)".format(it.width, it.depth, it.height)
-                    } ?: "측정값 없음"
+                    text = roomSize?.let {
+                        "W %.2f · D %.2f · H %.2f (m) %s".format(it.w, it.d, it.h, sizeTag)
+                    } ?: "측정값 없음 $sizeTag"
                 )
-                Text("스피커: ${savedSpeakers.size}개")
+                Text("스피커: ${speakerCount}개 $spkTag")
             }
             Spacer(Modifier.height(12.dp))
 
