@@ -617,7 +617,7 @@ private fun buildWorldRay(frame: Frame, sx: Float, sy: Float): Ray? {
 
 // ───────────────── DEPTH 샘플링 & 역투영 유틸 ─────────────────
 
-// DEPTH16 이미지에서 (dx,dy) 주변 winRadius 창의 중앙값(m)을 반환
+// DEPTH16 이미지에서 (dx,dy) 주변 winRadius 창의 중앙값을 반환
 private fun sampleDepthWindowMeters(
     depthImage: android.media.Image,
     dx: Float, dy: Float,
@@ -635,14 +635,14 @@ private fun sampleDepthWindowMeters(
 
     val values = ArrayList<Float>( (2*winRadius+1)*(2*winRadius+1) )
     val rowStride = plane.rowStride
-    val pixelStride = plane.pixelStride // DEPTH16 보통 2
+    val pixelStride = plane.pixelStride
 
     for (iy in (cy - winRadius).coerceAtLeast(0)..(cy + winRadius).coerceAtMost(h - 1)) {
         val rowOff = iy * rowStride
         for (ix in (cx - winRadius).coerceAtLeast(0)..(cx + winRadius).coerceAtMost(w - 1)) {
             val off = rowOff + ix * pixelStride
             if (off + 1 < buf.capacity()) {
-                val mm = buf.getShort(off).toInt() and 0xFFFF // unsigned 16-bit mm
+                val mm = buf.getShort(off).toInt() and 0xFFFF
                 if (mm > 0) {
                     val m = mm * 0.001f
                     if (m in validMin..validMax) values.add(m)
@@ -705,7 +705,7 @@ private fun iou(a: BoundingBox, b: BoundingBox): Float {
 
 private fun dedupBoxesByIoU(src: List<BoundingBox>, iouThresh: Float): List<BoundingBox> {
     val out = mutableListOf<BoundingBox>()
-    // ★ cnf(신뢰도) 기준으로 내림차순 정렬
+    // cnf(신뢰도) 기준 내림차순 정렬
     for (b in src.sortedByDescending { it.cnf }) {
         if (out.none { iou(it, b) >= iouThresh }) out += b
     }

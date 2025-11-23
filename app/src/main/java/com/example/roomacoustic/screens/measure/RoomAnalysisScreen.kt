@@ -68,6 +68,9 @@ fun RoomAnalysisScreen(
         mutableStateOf(manualListenerMap[roomId] ?: Vec2(roomSize.w * 0.5f, roomSize.d * 0.5f))
     }
 
+    var showConfirmDialog by rememberSaveable { mutableStateOf(false) }
+
+
     var xToLeftCm by rememberSaveable { mutableStateOf((listener.x * 100).roundToInt().toString()) }
     var zToFrontCm by rememberSaveable { mutableStateOf((listener.z * 100).roundToInt().toString()) }
     var inputError by rememberSaveable { mutableStateOf<String?>(null) }
@@ -100,13 +103,88 @@ fun RoomAnalysisScreen(
                             inputError = "청취 위치가 방 경계를 벗어났습니다."
                             return@Button
                         }
-                        vm.setManualListener(roomId, listener)
-                        nav.navigate(Screen.TestGuide.route)
+                        showConfirmDialog = true
                     }) { Text("다음") }
                 }
             }
         }
     ) { pad ->
+        // ───── 확인 다이얼로그 오버레이 ─────
+        if (showConfirmDialog) {
+            AlertDialog(
+                onDismissRequest = { showConfirmDialog = false },
+                title = { Text("이 청취 위치로 저장할까요?") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            "청취 위치: W=${fmt(listener.x)} m, D=${fmt(listener.z)} m",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Text(
+                            "평가 점수: ${eval.total} / 100",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+
+                        Spacer(Modifier.height(4.dp))
+                        Text("세부 항목", style = MaterialTheme.typography.titleSmall)
+                        eval.metrics.forEach { m ->
+                            Text("• ${m.name}: ${m.score}점")
+                            Text("  - ${m.detail}")
+                        }
+
+                        if (eval.notes.isNotEmpty()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text("주요 조언", style = MaterialTheme.typography.titleSmall)
+                            eval.notes.take(3).forEach { n ->
+                                Text("• $n")
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        // 1) 청취 위치 확정 저장
+                        vm.setManualListener(roomId, listener)
+
+                        // 2) EvaluationResult → ListeningEval 로 변환 후 저장
+                        val listeningEval = com.example.roomacoustic.model.ListeningEval(
+                            total = eval.total,
+                            metrics = eval.metrics.map { m ->
+                                com.example.roomacoustic.model.ListeningMetric(
+                                    name = m.name,
+                                    score = m.score,
+                                    detail = m.detail
+                                )
+                            },
+                            // notes + moveSuggestions(스피커 이동 권고)를 함께 텍스트로 저장
+                            notes = buildList {
+                                addAll(eval.notes)
+                                eval.moveSuggestions.forEach { s ->
+                                    val dxCm = ((s.to.x - s.from.x) * 100).roundToInt()
+                                    val dzCm = ((s.to.z - s.from.z) * 100).roundToInt()
+                                    add(
+                                        "스피커 ${s.label}: (${fmt(s.from.x)}, ${fmt(s.from.z)}) → " +
+                                                "(${fmt(s.to.x)}, ${fmt(s.to.z)}) m (Δx=${dxCm}cm, Δz=${dzCm}cm)"
+                                    )
+                                }
+                            }
+                        )
+                        vm.setListeningEval(roomId, listeningEval)
+
+                        showConfirmDialog = false
+                        nav.navigate(Screen.TestGuide.route)
+                    }) {
+                        Text("이 위치로 저장하고 다음")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showConfirmDialog = false }) {
+                        Text("다시 조정")
+                    }
+                }
+            )
+        }
+
         Column(
             modifier = Modifier
                 .padding(pad)                 // Scaffold가 내려준 안전영역
@@ -473,7 +551,9 @@ private fun evaluateListeningSetup(
     // (1) 청취 깊이: 38% 고정 → 30~45% 밴드로 완화 + 선형 스무딩
     val bandMin = room.d * 0.30f
     val bandMax = room.d * 0.45f
-    val taperD  = room.d * 0.15f // 밴드 밖에서 여기까지는 60점까지 선형 감점, 그 이상 floor
+    val taperD  = room.d * 0.15f
+
+    // 밴드 밖에서 여기까지는 60점까지 선형 감점, 그 이상 floor
 
     val m1Score = smoothToBand(
         value = listener.z,

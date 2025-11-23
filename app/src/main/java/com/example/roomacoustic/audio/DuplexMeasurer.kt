@@ -209,25 +209,23 @@ class DuplexMeasurer(private val ctx: Context) {
         //    - arraycopy → System.arraycopy로 고정
         //    - chunk 길이는 2의 배수(16bit 정렬) 유지
         // ───────────────────────────────────────────
-        val recBuf = ShortArray(sweep.size + cfg.sampleRate) // tail 여유
+        val recBuf = ShortArray(sweep.size + cfg.sampleRate)
         record.startRecording()
         track.play()
 
         var playOffset = 0
         var recOffset = 0
-        val tmpBytes = ByteArray(2048) // 짝수 유지(16bit 정렬)
+        val tmpBytes = ByteArray(2048)
 
-        // 선제 녹음(헤드룸 확보)
         record.read(recBuf, recOffset, min(recBuf.size - recOffset, 1024))
             .takeIf { it > 0 }?.let { recOffset += it }
 
         while (playOffset < sweepPCM.size) {
             var chunk = min(tmpBytes.size, sweepPCM.size - playOffset)
-            // 16bit 정렬: 짝수 길이 유지
+
             if ((chunk and 1) != 0) chunk -= 1
             if (chunk <= 0) break
 
-            // ⚠️ Kotlin의 arraycopy가 아니라 System.arraycopy 사용
             System.arraycopy(sweepPCM, playOffset, tmpBytes, 0, chunk)
             val w = track.write(tmpBytes, 0, chunk)
             if (w > 0) playOffset += w else if (w < 0) break
@@ -239,8 +237,7 @@ class DuplexMeasurer(private val ctx: Context) {
             }
         }
 
-        // tail 녹음(실내 잔향 포획)
-        val tailReads = cfg.sampleRate / 4 // ~250ms
+        val tailReads = cfg.sampleRate / 4
         repeat(tailReads) {
             val rNeed = min(recBuf.size - recOffset, 1024)
             if (rNeed <= 0) return@repeat
@@ -248,7 +245,6 @@ class DuplexMeasurer(private val ctx: Context) {
             if (r > 0) recOffset += r
         }
 
-        // 정리
         runCatching { track.stop() }; track.release()
         runCatching { record.stop() }; record.release()
 

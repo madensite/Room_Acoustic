@@ -7,8 +7,12 @@ sealed class Screen(val route: String) {
     object Room   : Screen("room")
 
     /* ─────────  챗봇 ───────── */
-    object NewChat : Screen("newChat/{roomId}")
-    object ExChat  : Screen("exChat/{roomId}")
+    object NewChat : Screen("newChat/{roomId}") {
+        fun of(roomId: Int) = "newChat/$roomId"
+    }
+    object ExChat  : Screen("exChat/{roomId}") {
+        fun of(roomId: Int) = "exChat/$roomId"
+    }
 
     /* ─────────  ★ 측정 플로우(서브그래프) ★  ───────── */
     /** 서브그래프 진입 가상 라우트 */

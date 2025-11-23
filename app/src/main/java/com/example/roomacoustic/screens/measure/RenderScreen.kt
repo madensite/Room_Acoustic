@@ -82,7 +82,6 @@ fun RenderScreen(
                 val d = Vec3(p[0], p[1], p[2]) - origin
                 Vec3(d.dot(vx), d.dot(vy), d.dot(vz))
             }
-            // frame3D가 null이면 let이 실행되지 않으므로 자연스럽게 null 반환
         }
     }
 

@@ -1,9 +1,8 @@
-package com.example.roomacoustic.screens.chat   // 원하는 패키지로 조정
+package com.example.roomacoustic.screens.chat
 
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.border
 import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,42 +19,107 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.example.roomacoustic.model.ChatMessage
-import com.example.roomacoustic.viewmodel.ChatViewModel
-import com.example.roomacoustic.util.PromptLoader   // ⬅️ 추가
-import androidx.compose.runtime.remember            // 이미 있음
-import androidx.compose.ui.platform.LocalContext    // ⬅️ 추가
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.roomacoustic.model.ChatMessage
+import com.example.roomacoustic.viewmodel.ChatViewModel
+import com.example.roomacoustic.viewmodel.RoomViewModel
+import com.example.roomacoustic.util.PromptLoader
 
+// 방 정보 모델들
+import com.example.roomacoustic.screens.components.RoomSize
+import com.example.roomacoustic.model.Vec2
+import com.example.roomacoustic.model.Vec3
+import com.example.roomacoustic.model.ListeningEval
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     nav: NavController,
     roomId: Int,
-    vm: ChatViewModel = androidx.lifecycle.viewmodel.compose.viewModel()
+    roomVm: RoomViewModel,
+    chatVm: ChatViewModel = viewModel()
 ) {
-    /* ① Context 가져오기 */
     val context = LocalContext.current
 
-    /* ② 자산 파일 → 메모리 (remember 덕분에 재조합 때 다시 안 읽음) */
+    // 🔹 프롬프트들 한 번만 로드
     val systemPrompt by remember {
-        mutableStateOf(PromptLoader.load(context))   // 기본값: "assets/prompt/prompt001.txt"
+        mutableStateOf(
+            PromptLoader.load(context, "prompt/chat_system.txt")
+        )
+    }
+    val bootstrapTemplate by remember {
+        mutableStateOf(
+            PromptLoader.load(context, "prompt/chat_bootstrap.txt")
+        )
+    }
+    val userWrapperTemplate by remember {
+        mutableStateOf(
+            PromptLoader.load(context, "prompt/chat_user_wrapper.txt")
+        )
     }
 
-    val msgs by vm.messages.collectAsState()
+    // 채팅 메시지
+    val msgs by chatVm.messages.collectAsState()
+
+    // 🔹 방 컨텍스트 수집 (지금 코드 그대로)
+    val manualRoomSizeMap by roomVm.manualRoomSize.collectAsState()
+    val manualSpeakersMap by roomVm.manualSpeakers.collectAsState()
+    val manualListenerMap by roomVm.manualListener.collectAsState()
+
+    val roomSize: RoomSize? = manualRoomSizeMap[roomId]
+    val speakers: List<Vec3> = manualSpeakersMap[roomId] ?: emptyList()
+    val listener: Vec2? = manualListenerMap[roomId]
+
+    val listeningEval: ListeningEval? = roomVm.listeningEvalFor(roomId)
+
+    val contextJson by remember(roomId, roomSize, speakers, listener, listeningEval) {
+        mutableStateOf(
+            buildRoomContextJson(
+                roomId = roomId,
+                roomSize = roomSize,
+                listener = listener,
+                speakers = speakers,
+                eval = listeningEval
+            )
+        )
+    }
+
     val listState = rememberLazyListState()
 
+    // 🔹 화면 진입 시 1회 자동 질문
+    var bootstrapped by remember(roomId) { mutableStateOf(false) }
+
+    LaunchedEffect(roomId, roomSize, listeningEval, msgs.size) {
+        if (bootstrapped || msgs.isNotEmpty()) return@LaunchedEffect
+
+        if (roomSize != null) {
+            // chat_bootstrap.txt 안의 {{CONTEXT_JSON}} 치환
+            val firstUserPayload = bootstrapTemplate.replace(
+                "{{CONTEXT_JSON}}",
+                contextJson
+            )
+
+            chatVm.sendPrompt(
+                systemPrompt = systemPrompt,
+                visibleUserText = null,          // ✅ 사용자 말풍선 X
+                payloadForModel = firstUserPayload,
+                appendUser = false,              // ✅ user 메시지로 기록 X
+                onError = { /* TODO: 에러 처리 */ }
+            )
+            bootstrapped = true
+        }
+    }
 
     Scaffold(
         modifier = Modifier.windowInsetsPadding(WindowInsets.safeDrawing),
         topBar = {
             SmallTopAppBar(
                 title = { Text("") },
-                //title = { Text("대화 (방 #$roomId)") },
                 navigationIcon = {
                     IconButton(onClick = { nav.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "뒤로")
@@ -68,48 +132,42 @@ fun ChatScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(inner)
-
         ) {
-
-            /* --- 메시지 리스트 --- */
+            // --- 메시지 리스트 ---
             LazyColumn(
                 state = listState,
-                reverseLayout = true,                     // 🔹 아래 → 위 정렬
+                reverseLayout = true,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
                 contentPadding = PaddingValues(8.dp)
             ) {
-                // 🔹 역순 공급해야 말풍선 순서가 올바름
                 items(msgs.asReversed()) { ChatBubble(it) }
             }
 
-            /* 새 메시지 추가 시, 항상 '아래쪽(=index 0)'으로 스크롤 */
             LaunchedEffect(msgs.size) {
                 listState.animateScrollToItem(0)
             }
 
-            /* --- 입력창 + 전송 버튼 --- */
+            // --- 입력창 + 전송 버튼 ---
             var input by remember { mutableStateOf("") }
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // 키보드(IME) + 내비게이션바(BOTTOM)만 합친 패딩
                     .windowInsetsPadding(
                         WindowInsets
-                            .ime                       // 키보드
-                            .union(WindowInsets.navigationBars)   // + 내비게이션바
-                            .only(WindowInsetsSides.Bottom)       // 하단만 적용
+                            .ime
+                            .union(WindowInsets.navigationBars)
+                            .only(WindowInsetsSides.Bottom)
                     )
-                    .padding(horizontal = 8.dp, vertical = 4.dp),  // 시각적 여백
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                /* 슬림한 입력창 */
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(40.dp)                              // 얇게
+                        .height(40.dp)
                         .border(1.dp, Color.Gray, MaterialTheme.shapes.small)
                         .padding(horizontal = 8.dp, vertical = 4.dp),
                     contentAlignment = Alignment.CenterStart
@@ -128,9 +186,15 @@ fun ChatScreen(
                 IconButton(
                     enabled = input.isNotBlank(),
                     onClick = {
-                        vm.sendPrompt(                       // (1) systemPrompt 인자 추가
+                        // chat_user_wrapper.txt에 값 집어넣기
+                        val payload = userWrapperTemplate
+                            .replace("{{CONTEXT_JSON}}", contextJson)
+                            .replace("{{USER_MESSAGE}}", input)
+
+                        chatVm.sendPrompt(
                             systemPrompt = systemPrompt,
-                            userText = input,
+                            visibleUserText = input,   // ✅ 말풍선에는 이 한 줄만
+                            payloadForModel = payload, // ✅ GPT에는 전체 payload
                             onError = { /* TODO: 에러 처리 */ }
                         )
                         input = ""
@@ -138,11 +202,11 @@ fun ChatScreen(
                 ) {
                     Icon(Icons.Default.Send, contentDescription = "보내기")
                 }
-
             }
         }
     }
 }
+
 
 /* --------- 단일 메시지 버블 ---------- */
 @Composable
@@ -168,4 +232,75 @@ private fun ChatBubble(msg: ChatMessage) {
                 .padding(10.dp)
         )
     }
+}
+
+/* --------- 방 컨텍스트 JSON 빌더 ---------- */
+
+private fun buildRoomContextJson(
+    roomId: Int,
+    roomSize: RoomSize?,
+    listener: Vec2?,
+    speakers: List<Vec3>,
+    eval: ListeningEval?
+): String {
+    // JSON 라이브러리 없이, 문자열로만 구성
+    val sb = StringBuilder()
+    sb.append("{\n")
+    sb.append("  \"roomId\": $roomId,\n")
+
+    if (roomSize != null) {
+        sb.append("  \"roomSize\": {\n")
+        sb.append("    \"width_m\": ${roomSize.w},\n")
+        sb.append("    \"depth_m\": ${roomSize.d},\n")
+        sb.append("    \"height_m\": ${roomSize.h}\n")
+        sb.append("  },\n")
+    } else {
+        sb.append("  \"roomSize\": null,\n")
+    }
+
+    if (listener != null) {
+        sb.append("  \"listener\": {\n")
+        sb.append("    \"x_m_from_left\": ${listener.x},\n")
+        sb.append("    \"z_m_from_front\": ${listener.z}\n")
+        sb.append("  },\n")
+    } else {
+        sb.append("  \"listener\": null,\n")
+    }
+
+    sb.append("  \"speakers\": [\n")
+    speakers.forEachIndexed { idx, s ->
+        sb.append(
+            "    { \"index\": $idx, \"x_m\": ${s.x}, \"y_m\": ${s.y}, \"z_m\": ${s.z} }"
+        )
+        if (idx != speakers.lastIndex) sb.append(",")
+        sb.append("\n")
+    }
+    sb.append("  ],\n")
+
+    if (eval != null) {
+        sb.append("  \"listeningEval\": {\n")
+        sb.append("    \"totalScore\": ${eval.total},\n")
+        sb.append("    \"metrics\": [\n")
+        eval.metrics.forEachIndexed { i, m ->
+            sb.append(
+                "      { \"name\": \"${m.name}\", \"score\": ${m.score}, \"detail\": \"${m.detail.replace("\"", "\\\"")}\" }"
+            )
+            if (i != eval.metrics.lastIndex) sb.append(",")
+            sb.append("\n")
+        }
+        sb.append("    ],\n")
+        sb.append("    \"notes\": [\n")
+        eval.notes.forEachIndexed { i, n ->
+            sb.append("      \"${n.replace("\"", "\\\"")}\"")
+            if (i != eval.notes.lastIndex) sb.append(",")
+            sb.append("\n")
+        }
+        sb.append("    ]\n")
+        sb.append("  }\n")
+    } else {
+        sb.append("  \"listeningEval\": null\n")
+    }
+
+    sb.append("}")
+    return sb.toString()
 }

@@ -137,7 +137,7 @@ fun TwoPointMeasureScreen(
     /* ── 프레임 루프 ── */
     LaunchedEffect(sceneView) {
         val update: (Session, Frame) -> Unit = { _, frame ->
-            // 탭 처리
+
             if (tapQueue.isNotEmpty()) {
                 val taps = tapQueue.toList()
                 tapQueue.clear()
@@ -151,7 +151,7 @@ fun TwoPointMeasureScreen(
                     }
                 }
             }
-            // 레티클 실시간 거리 + 월드→스크린 좌표 갱신
+
             val cx = viewW/2f; val cy = viewH/2f
             val h  = hitTestOrDepth(frame, cx, cy)
             hoverPoint  = h

@@ -21,6 +21,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import com.example.roomacoustic.screens.components.RoomSize
 import com.example.roomacoustic.model.Vec2
 import kotlinx.coroutines.flow.update
+import com.example.roomacoustic.model.ListeningEval
+import com.example.roomacoustic.model.ListeningMetric
+
 
 class RoomViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -31,7 +34,8 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
     private val analysisRepo = AnalysisRepository(
         db.recordingDao(),
         db.measureDao(),
-        db.speakerDao()
+        db.speakerDao(),
+        db.listeningEvalDao()
     )
 
     // ───────── 방 리스트 (기존) ─────────
@@ -285,6 +289,29 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ───── 방별 청취 위치 평가 결과 (ListeningEval) ─────
+    private val _listeningEval = MutableStateFlow<Map<Int, ListeningEval>>(emptyMap())
+    val listeningEval: StateFlow<Map<Int, ListeningEval>> = _listeningEval.asStateFlow()
+
+    fun setListeningEval(roomId: Int, eval: ListeningEval?) {
+        _listeningEval.update { old ->
+            val next = old.toMutableMap()
+            if (eval == null) next.remove(roomId) else next[roomId] = eval
+            next
+        }
+        // 2) DB에도 반영
+        viewModelScope.launch {
+            if (eval == null) {
+                analysisRepo.deleteListeningEval(roomId)
+            } else {
+                analysisRepo.saveListeningEval(roomId, eval)
+            }
+        }
+    }
+
+    fun listeningEvalFor(roomId: Int): ListeningEval? =
+        _listeningEval.value[roomId]
+
     // ① 방별 청취자 위치
     private val _listener2D = MutableStateFlow<Map<Int, Listener2D>>(emptyMap())
     val listener2D: StateFlow<Map<Int, Listener2D>> = _listener2D
@@ -396,6 +423,8 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
             notes = notes.ifEmpty { listOf("스피커가 2개가 아니라면 좌우 대칭 기준은 생략됩니다.") }
         )
     }
+
+
 
 
 

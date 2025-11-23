@@ -121,7 +121,6 @@ private fun fftConvolve(a: FloatArray, b: FloatArray): FloatArray {
     fft(are, aim, false)
     fft(bre, bim, false)
 
-    // point-wise multiply: (ar+jai)*(br+jbi)
     for (i in 0 until nFFT) {
         val r = are[i] * bre[i] - aim[i] * bim[i]
         val im = are[i] * bim[i] + aim[i] * bre[i]

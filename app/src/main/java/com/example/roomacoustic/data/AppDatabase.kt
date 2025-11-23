@@ -10,9 +10,10 @@ import androidx.room.RoomDatabase
         RoomEntity::class,                 // 기존 테이블
         RecordingEntity::class,            // ★ 추가
         MeasureEntity::class,              // ★ 추가
-        SpeakerEntity::class               // ★ 추가
+        SpeakerEntity::class,               // ★ 추가
+        ListeningEvalEntity::class,
     ],
-    version = 2,                           // ★ 기존보다 +1
+    version = 3,                           // ★ 기존보다 +1
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -24,6 +25,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun recordingDao(): RecordingDao
     abstract fun measureDao(): MeasureDao
     abstract fun speakerDao(): SpeakerDao
+    abstract fun listeningEvalDao(): ListeningEvalDao
+
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null

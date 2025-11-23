@@ -8,8 +8,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Menu      // 햄버거 아이콘
-import androidx.compose.material.icons.filled.Close    // X 아이콘
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -49,7 +49,7 @@ fun RoomScreen(
     val appCtx = LocalContext.current.applicationContext
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {                   // BG thread
+        withContext(Dispatchers.IO) {
             Detector(
                 context = appCtx,
                 modelPath = Constants.MODEL_PATH,
@@ -60,9 +60,9 @@ fun RoomScreen(
                 },
                 message = {}
             ).apply {
-                restart(useGpu = true)   // GPU delegate attach
-                warmUp()                // ★ 첫 run() = shader compile
-                close()                 // Interpreter 종료, delegate 캐시는 남음
+                restart(useGpu = true)
+                warmUp()
+                close()
             }
         }
     }
@@ -193,7 +193,7 @@ fun RoomScreen(
                     nav.navigate(Screen.MeasureGraph.route)
                 }
             } else {
-                // ✅ 결과 보기 분리
+                // 결과 보기 분리
                 SheetItem("3D 결과 보기") {
                     tappedRoom = null
                     nav.navigate(Screen.ResultRender.of(room.id)) {

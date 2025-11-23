@@ -59,14 +59,22 @@ fun AppRoot() {
                 arguments = listOf(navArgument("roomId") { type = NavType.IntType })
             ) { backStackEntry ->
                 val roomId = backStackEntry.arguments!!.getInt("roomId")
-                ChatScreen(nav, roomId)
+                ChatScreen(
+                    nav = nav,
+                    roomId = roomId,
+                    roomVm = vm
+                )
             }
             composable(
                 route = Screen.ExChat.route,
                 arguments = listOf(navArgument("roomId") { type = NavType.IntType })
             ) { backStackEntry ->
                 val roomId = backStackEntry.arguments!!.getInt("roomId")
-                ChatScreen(nav, roomId)
+                ChatScreen(
+                    nav = nav,
+                    roomId = roomId,
+                    roomVm = vm
+                )
             }
 
             // ── 측정 플로우 서브그래프 ──
@@ -104,8 +112,8 @@ fun AppRoot() {
                     RenderScreen(nav = nav, vm = vm, detected = false)
                 }
 
-                // 4) ✅ 새 화면: 평면도 뷰 + 청취 위치 선택 + 규칙 평가
-                composable(Screen.RoomAnalysis.route) { RoomAnalysisScreen(nav, vm) } // ✅ 추가
+                // 4) 새 화면: 평면도 뷰 + 청취 위치 선택 + 규칙 평가
+                composable(Screen.RoomAnalysis.route) { RoomAnalysisScreen(nav, vm) }
 
                 // 5) 녹음 가이드 및 진행
                 composable(Screen.TestGuide.route) { TestGuideScreen(nav, vm) }
