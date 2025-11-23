@@ -36,12 +36,15 @@ import com.example.roomacoustic.model.Vec2
 import com.example.roomacoustic.model.Vec3
 import com.example.roomacoustic.model.ListeningEval
 
+enum class ChatMode { NEW, CONTINUE }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
     nav: NavController,
     roomId: Int,
     roomVm: RoomViewModel,
+    mode: ChatMode,
     chatVm: ChatViewModel = viewModel()
 ) {
     val context = LocalContext.current
@@ -61,6 +64,19 @@ fun ChatScreen(
         mutableStateOf(
             PromptLoader.load(context, "prompt/chat_user_wrapper.txt")
         )
+    }
+
+    // 🔹 모드에 따른 초기화 (NEW / CONTINUE)
+    LaunchedEffect(roomId, mode) {
+        when (mode) {
+            ChatMode.NEW -> {
+                // 👉 이 두 함수는 ChatViewModel에 구현해 줄 예정
+                chatVm.startNewConversation(roomId)   // 이전 대화 삭제 + currentRoomId 설정
+            }
+            ChatMode.CONTINUE -> {
+                chatVm.loadConversation(roomId)        // currentRoomId 설정 + DB에서 불러오기
+            }
+        }
     }
 
     // 채팅 메시지
@@ -91,14 +107,18 @@ fun ChatScreen(
 
     val listState = rememberLazyListState()
 
-    // 🔹 화면 진입 시 1회 자동 질문
-    var bootstrapped by remember(roomId) { mutableStateOf(false) }
+    // 🔹 부트스트랩 여부 플래그
+    var bootstrapped by remember(roomId, mode) { mutableStateOf(false) }
 
-    LaunchedEffect(roomId, roomSize, listeningEval, msgs.size) {
-        if (bootstrapped || msgs.isNotEmpty()) return@LaunchedEffect
+    LaunchedEffect(roomId, mode, roomSize, listeningEval, msgs.size) {
+        // 1) 기존 대화 이어가기 모드에서는 절대 부트스트랩 X
+        if (mode == ChatMode.CONTINUE) return@LaunchedEffect
 
-        if (roomSize != null) {
-            // chat_bootstrap.txt 안의 {{CONTEXT_JSON}} 치환
+        // 2) 이미 한 번 보냈으면 다시 보내지 않음
+        if (bootstrapped) return@LaunchedEffect
+
+        // 3) NEW 모드인데, 아직 어떤 메시지도 없는 상태에서만 실행
+        if (roomSize != null && msgs.isEmpty()) {
             val firstUserPayload = bootstrapTemplate.replace(
                 "{{CONTEXT_JSON}}",
                 contextJson
@@ -106,10 +126,10 @@ fun ChatScreen(
 
             chatVm.sendPrompt(
                 systemPrompt = systemPrompt,
-                visibleUserText = null,          // ✅ 사용자 말풍선 X
+                visibleUserText = null,   // 사용자 말풍선 X
                 payloadForModel = firstUserPayload,
-                appendUser = false,              // ✅ user 메시지로 기록 X
-                onError = { /* TODO: 에러 처리 */ }
+                appendUser = false,
+                onError = { /* TODO */ }
             )
             bootstrapped = true
         }
@@ -206,7 +226,6 @@ fun ChatScreen(
         }
     }
 }
-
 
 /* --------- 단일 메시지 버블 ---------- */
 @Composable

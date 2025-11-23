@@ -14,24 +14,49 @@ import retrofit2.Call
 import retrofit2.Callback
 import retrofit2.Response
 
-// ✅ 1) 모드 enum (같은 파일 맨 위쪽에 두면 됨)
-enum class ChatMode {
-    FREE_TALK,      // 가볍게 대화하는 모드
-    ANALYSIS        // 방 분석/추천 모드
-}
-
 class ChatViewModel : ViewModel() {
 
-    // ✅ 2) 채팅 메시지 상태
+    // ✅ 1) 현재 방 ID (Room별 대화 구분용)
+    private val _currentRoomId = MutableStateFlow<Int?>(null)
+    val currentRoomId: StateFlow<Int?> = _currentRoomId
+
+    // ✅ 2) 채팅 메시지 상태 (현재 방에 대한 메시지 리스트)
     private val _messages = MutableStateFlow<List<ChatMessage>>(emptyList())
     val messages: StateFlow<List<ChatMessage>> = _messages
 
-    // ✅ 3) 현재 모드 상태
-    private val _mode = MutableStateFlow(ChatMode.FREE_TALK)
-    val mode: StateFlow<ChatMode> = _mode
+    fun setMessages(initial: List<ChatMessage>) {
+        _messages.value = initial
+    }
 
-    fun setMode(mode: ChatMode) {
-        _mode.value = mode
+    // ✅ 3) "새 대화 시작" (RoomScreen에서 mode = NEW일 때 호출)
+    fun startNewConversation(roomId: Int) {
+        _currentRoomId.value = roomId
+
+        // 이 방에 대한 이전 대화는 모두 비운다
+        _messages.value = emptyList()
+
+        // TODO:
+        // 여기에 Room DB를 쓴다면,
+        // - 해당 roomId의 기존 채팅 레코드를 삭제하는 로직을 넣으면 된다.
+        //   ex) chatRepository.deleteMessagesForRoom(roomId)
+    }
+
+    // ✅ 4) "기존 대화 이어가기" (RoomScreen에서 mode = CONTINUE일 때 호출)
+    fun loadConversation(roomId: Int) {
+        _currentRoomId.value = roomId
+
+        // TODO:
+        // 여기에서 DB 또는 로컬 저장소에서 roomId에 해당하는 메시지들을 불러와서
+        // _messages.value = 불러온 목록
+        //
+        // 예시 (Room DB가 있다고 가정하면):
+        // viewModelScope.launch {
+        //     val history = chatRepository.getMessagesForRoom(roomId)
+        //     _messages.value = history
+        // }
+        //
+        // 지금은 DB 코드가 없으니, 빈 구현으로 두고
+        // 나중에 실제 저장소 붙일 때 이 부분만 손보면 된다.
     }
 
     fun clearConversation() {
@@ -39,7 +64,7 @@ class ChatViewModel : ViewModel() {
     }
 
     /**
-     * ✅ 핵심 변경 포인트
+     * ✅ 핵심 포인트
      *  - visibleUserText: UI에 보일 사용자 메시지 (짧은 한국어 문장)
      *  - payloadForModel: GPT에 보낼 실제 텍스트 (CONTEXT_JSON + USER_MESSAGE 래핑 포함)
      *  - appendUser: true일 때만 사용자 말풍선 추가 (false면 백그라운드 호출용)
@@ -85,9 +110,9 @@ class ChatViewModel : ViewModel() {
                         ?.trim()
 
                     if (!content.isNullOrBlank()) {
-                        append("gpt", content)
+                        append("assistant", content)
                     } else {
-                        append("gpt", "⚠️ GPT 응답이 비었습니다.")
+                        append("assistant", "⚠️ GPT 응답이 비었습니다.")
                     }
                 } else {
                     onError("OpenAI 오류: ${resp.code()}")
@@ -102,6 +127,18 @@ class ChatViewModel : ViewModel() {
 
     // 내부에서 메시지 추가
     private fun append(sender: String, content: String) {
-        _messages.update { it + ChatMessage(sender, content) }
+        val roomId = _currentRoomId.value ?: -1   // ⚠️ roomId 없으면 임시값(-1). 원래는 NEW/CONTINUE 진입 때 꼭 셋팅해야 함
+        val now = System.currentTimeMillis()
+
+        val msg = ChatMessage(
+            id = 0L,              // 새로 생성된 메시지 → DB에서 auto id 줄 거면 0L 써도 됨
+            roomId = roomId,
+            sender = sender,      // "user" or "assistant"
+            content = content,
+            createdAt = now
+        )
+
+        _messages.update { it + msg }
     }
+
 }

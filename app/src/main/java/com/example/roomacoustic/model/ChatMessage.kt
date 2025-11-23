@@ -1,6 +1,9 @@
 package com.example.roomacoustic.model
 
 data class ChatMessage(
-    val sender: String, // "user" or "gpt"
-    val content: String
+    val id: Long = 0L,
+    val roomId: Int,
+    val sender: String,
+    val content: String,
+    val createdAt: Long
 )

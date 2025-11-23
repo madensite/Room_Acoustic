@@ -17,7 +17,9 @@ import com.example.roomacoustic.navigation.Screen
 import com.example.roomacoustic.screens.RoomScreen
 import com.example.roomacoustic.screens.SplashScreen
 import com.example.roomacoustic.ui.theme.RoomacousticTheme
+import com.example.roomacoustic.screens.chat.ChatMode
 import com.example.roomacoustic.screens.chat.ChatScreen
+
 
 // ▼ 측정/탐지 화면들
 import com.example.roomacoustic.screens.measure.CameraGuideScreen
@@ -59,21 +61,26 @@ fun AppRoot() {
                 arguments = listOf(navArgument("roomId") { type = NavType.IntType })
             ) { backStackEntry ->
                 val roomId = backStackEntry.arguments!!.getInt("roomId")
+
                 ChatScreen(
                     nav = nav,
                     roomId = roomId,
-                    roomVm = vm
+                    roomVm = vm,
+                    mode = ChatMode.NEW          // ✅ 새 대화 모드
                 )
             }
+
             composable(
                 route = Screen.ExChat.route,
                 arguments = listOf(navArgument("roomId") { type = NavType.IntType })
             ) { backStackEntry ->
                 val roomId = backStackEntry.arguments!!.getInt("roomId")
+
                 ChatScreen(
                     nav = nav,
                     roomId = roomId,
-                    roomVm = vm
+                    roomVm = vm,
+                    mode = ChatMode.CONTINUE     // ✅ 기존 대화 이어가기 모드
                 )
             }
 
