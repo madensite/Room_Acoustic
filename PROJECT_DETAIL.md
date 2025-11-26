@@ -177,7 +177,9 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
 *   **`MeasureDao.kt`**: `MeasureEntity`에 대한 DAO 인터페이스. `insert()`, `latestByRoom()` 함수를 포함합니다.
 *   **`RecordingDao.kt`**: `RecordingEntity`에 대한 DAO 인터페이스. `insert()`, `latestByRoom()`, `listByRoom()` 함수를 포함합니다.
 *   **`SpeakerDao.kt`**: `SpeakerEntity`에 대한 DAO 인터페이스. `insertAll()`, `deleteByRoom()`, `listByRoom()` 함수를 포함합니다.
+*   **`ListeningEvalDao.kt`**: 청취 위치 평가(`ListeningEvalEntity`) 저장/조회 CRUD를 제공합니다.
 *   **`RoomEntity.kt`**: 방 정보를 저장하는 데이터 클래스. `id`, `title`, `hasMeasure`, `measureUpdatedAt`, `hasChat`, `lastChatPreview`, `chatUpdatedAt` 필드를 가집니다.
+*   **`ListeningEvalEntity.kt`**: 청취 위치 평가 메트릭/노트/이동 제안을 기록하며 `listening_eval` 테이블에 매핑됩니다.
 *   **`MeasureEntity.kt`**: 방의 측정값(폭, 깊이, 높이)을 저장하는 데이터 클래스. `roomId`를 외래 키로 가집니다.
 *   **`RecordingEntity.kt`**: 음향 측정 녹음 파일 정보를 저장하는 데이터 클래스. `roomId`를 외래 키로 가집니다.
 *   **`SpeakerEntity.kt`**: 스피커의 3D 위치(`x`, `y`, `z`)를 저장하는 데이터 클래스. `roomId`를 외래 키로 가집니다.
@@ -185,7 +187,7 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
 ### 2.11. `repo` 패키지 (`RoomRepository.kt`, `AnalysisRepository.kt`)
 
 *   **`RoomRepository.kt`**: `RoomDao`를 사용하여 `RoomEntity` 데이터에 대한 비즈니스 로직을 처리합니다. 방 추가, 이름 변경, 측정/대화 상태 업데이트, 삭제 등의 기능을 제공합니다. `Dispatchers.IO`를 사용하여 DB 작업을 백그라운드 스레드에서 수행합니다.
-*   **`AnalysisRepository.kt`**: `RecordingDao`, `MeasureDao`, `SpeakerDao`를 사용하여 음향 측정 녹음, 방 크기 측정, 스피커 위치 데이터에 대한 저장 및 조회 기능을 제공합니다.
+*   **`AnalysisRepository.kt`**: `RecordingDao`, `MeasureDao`, `SpeakerDao`, `ListeningEvalDao`를 사용하여 음향 측정 녹음, 방 크기 측정, 스피커 위치, 청취 평가 데이터에 대한 저장 및 조회 기능을 제공합니다.
 
 ### 2.12. `viewmodel` 패키지 (`RoomViewModel.kt`, `ChatViewModel.kt`)
 
@@ -316,7 +318,7 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
 *   **`GeometryUtil.kt`**: `PickedPoints`를 기반으로 `AxisFrame` 및 방 크기를 계산하고, 측정값의 유효성을 검사하는 기하학 유틸리티.
 *   **`ImageUtils.kt`**: `Bitmap`을 안드로이드 `Pictures/` 디렉토리에 JPEG 형식으로 저장하고 `Uri`를 반환하는 유틸리티.
 *   **`MeasureDisplayFormatter.kt`**: 측정된 길이를 미터 또는 피트/인치 형식으로 포맷하는 `sealed interface` 및 구현체.
-*   **`PromptLoader.kt`**: `assets` 폴더의 텍스트 파일(예: `prompt001.txt`)을 읽어오는 유틸리티.
+*   **`PromptLoader.kt`**: `assets/prompt`의 `chat_system.txt`, `chat_bootstrap.txt`, `chat_user_wrapper.txt`, `prompt004.txt`를 읽어 조합하는 유틸리티.
 *   **`SpeakerShotCache.kt`**: 스피커 탐지 시 촬영된 이미지의 `Uri`를 임시로 캐시하는 `ConcurrentHashMap` 기반의 싱글톤 객체.
 *   **`ViewAnimation.kt`**: `View`에 플립 애니메이션을 적용하는 확장 함수.
 *   **`YuvToRgbConverter.kt`**: CameraX의 `Image` 객체(YUV_420_888 형식)를 RGB `Bitmap`으로 효율적으로 변환하는 유틸리티.
@@ -425,3 +427,11 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
 
 *   **UI 안정성 및 버그 수정**
     *   앱 전반의 여러 화면에서 시스템 UI(상태 바 등)가 컨텐츠를 가리는 문제를 해결하기 위해 `WindowInsets`을 적용하여 레이아웃을 수정했습니다.
+
+### 4.4 25.11.25. 리팩토링
+
+#### 코드 구조 리팩토링
+- **챗봇 프롬프트 자산/로딩**: `chat_system.txt`, `chat_bootstrap.txt`, `chat_user_wrapper.txt`, `prompt004.txt`를 조합해 컨텍스트 JSON과 함께 GPT 요청을 구성하도록 변경했습니다.
+- **네비게이션 시작/경로**: 측정 플로우의 시작점을 `CameraGuideScreen`으로 명시하고, `RenderScreen`의 `detected` 기본값 분기 처리를 추가했습니다.
+- **청취 위치 평가 저장**: `RoomAnalysisScreen`에서 탑다운 캔버스, 4종 메트릭, 스피커 이동 제안을 안내하고 확인 시 ListeningEval을 DB(`listening_eval`)에 저장합니다.
+- **DB 스키마 확장**: `AppDatabase`를 version 3으로 올리고 `ListeningEvalEntity/Dao`를 추가했으며, 레포지토리/뷰모델에서 평가 CRUD를 처리하도록 반영했습니다.

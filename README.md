@@ -69,7 +69,7 @@ RoomAcoustic 프로젝트는 기능별로 모듈화되어 있으며, 각 모듈�
     *   YOLO 모델의 초기 지연을 줄이기 위한 `Detector` 예열 로직이 포함되어 있습니다.
 *   **`chat/ChatScreen.kt`**:
     *   OpenAI API 기반 AI 챗봇과의 대화 화면입니다.
-    *   `PromptLoader`를 통해 시스템 프롬프트를 로드하고, `ChatViewModel`을 통해 메시지를 주고받습니다.
+    *   `PromptLoader`로 `chat_system.txt`, `chat_bootstrap.txt`, `chat_user_wrapper.txt`, `prompt004.txt`를 불러와 컨텍스트 JSON과 함께 GPT 요청을 구성하며, `ChatViewModel`을 통해 메시지를 주고받습니다.
     *   `LazyColumn`과 `windowInsetsPadding`을 활용하여 사용자 친화적인 채팅 UI를 제공합니다.
 *   **`measure` 패키지 (측정 플로우)**:
     *   **`TwoPointMeasureScreen.kt`**: 폭, 깊이, 높이 측정에 재사용되는 AR 기반 두 점 측정 화면입니다. ARCore의 `RAW_DEPTH_ONLY` 모드를 활용하여 두 지점 간의 거리를 측정하고 시각화합니다.
@@ -92,8 +92,8 @@ RoomAcoustic 프로젝트는 기능별로 모듈화되어 있으며, 각 모듈�
 
 ### 6. `data` 패키지 (Room Database)
 *   **`AppDatabase.kt`**: Room 데이터베이스의 추상 클래스입니다.
-*   **`RoomDao.kt`, `MeasureDao.kt`, `RecordingDao.kt`, `SpeakerDao.kt`**: 각 엔티티(`RoomEntity`, `MeasureEntity`, `RecordingEntity`, `SpeakerEntity`)에 대한 데이터 접근 객체(DAO) 인터페이스를 정의합니다.
-*   **`RoomEntity.kt`, `MeasureEntity.kt`, `RecordingEntity.kt`, `SpeakerEntity.kt`**: 로컬 데이터베이스에 저장될 데이터 모델을 정의합니다.
+*   **`RoomDao.kt`, `MeasureDao.kt`, `RecordingDao.kt`, `SpeakerDao.kt`, `ListeningEvalDao.kt`**: 각 엔티티(`RoomEntity`, `MeasureEntity`, `RecordingEntity`, `SpeakerEntity`, `ListeningEvalEntity`)에 대한 데이터 접근 객체(DAO) 인터페이스를 정의합니다.
+*   **`RoomEntity.kt`, `MeasureEntity.kt`, `RecordingEntity.kt`, `SpeakerEntity.kt`, `ListeningEvalEntity.kt`**: 로컬 데이터베이스에 저장될 데이터 모델을 정의합니다.
 
 ### 7. `repo` 패키지 (Repository Pattern)
 *   **`RoomRepository.kt`**: `RoomDao`를 통해 방 데이터에 대한 비즈니스 로직을 처리합니다.
@@ -170,6 +170,13 @@ OPENAI_API_KEY="YOUR_API_KEY_HERE"
 *   **신규 화면 대거 추가**: `CameraGuideScreen`, `RoomAnalysisScreen`, `ResultAnalysisScreen`, `ResultRenderScreen`을 추가하여 사용자 경험과 분석 기능을 대폭 강화했습니다.
 *   **수동 스피커 등록 기능**: `RenderScreen`에서 사용자가 직접 스피커 위치를 등록하고 편집할 수 있는 기능을 추가하여 측정 유연성을 높였습니다.
 *   **네비게이션 흐름 개선**: 측정 시작 시 `CameraGuideScreen`을 통해 자동/수동 측정 옵션을 제공하고, `RoomAnalysisScreen`을 측정 플로우에 통합하여 분석 단계를 강화하는 등 전체적인 화면 흐름을 개선했습니다.
+
+### 25.11.25
+*   **챗봇 프롬프트 자산/로딩**: `chat_system.txt`, `chat_bootstrap.txt`, `chat_user_wrapper.txt`, `prompt004.txt`를 조합해 컨텍스트 JSON과 함께 GPT 요청을 구성하도록 변경했습니다.
+*   **네비게이션 시작/경로**: 측정 플로우의 시작점을 `CameraGuideScreen`으로 명시하고, `RenderScreen`의 `detected` 기본값 분기 처리를 추가했습니다.
+*   **청취 위치 평가 저장**: `RoomAnalysisScreen`에서 탑다운 캔버스, 4종 메트릭, 스피커 이동 제안을 안내하고 확인 시 ListeningEval을 DB(`listening_eval`)에 저장합니다.
+*   **DB 스키마 확장**: `AppDatabase`를 version 3으로 올리고 `ListeningEvalEntity/Dao`를 추가했으며, 레포지토리/뷰모델에서 평가 CRUD를 처리하도록 반영했습니다.
+
 
 
 ## 📌 참고 이미지 (추후 추가 예정)
