@@ -22,7 +22,9 @@ import com.example.roomacoustic.screens.components.RoomSize
 import com.example.roomacoustic.model.Vec2
 import kotlinx.coroutines.flow.update
 import com.example.roomacoustic.model.ListeningEval
-import com.example.roomacoustic.model.ListeningMetric
+import com.example.roomacoustic.model.PickedPoints
+import com.example.roomacoustic.model.toMeasure3DResultOrNull
+
 
 
 class RoomViewModel(app: Application) : AndroidViewModel(app) {
@@ -124,6 +126,11 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun clearLabeledMeasures() { _labeledMeasures.value = emptyList() }
 
+    // ───── 3축(폭/깊이/높이) 측정을 통해 모은 6점 ─────
+    private val _pickedPoints = MutableStateFlow(PickedPoints())
+    val pickedPoints: StateFlow<PickedPoints> = _pickedPoints.asStateFlow()
+
+
     // 수동 스피커 페어 (기존)
     private val _manualSpeakerPair = MutableStateFlow<Pair<Vec3, Vec3>?>(null)
     val manualSpeakerPair = _manualSpeakerPair.asStateFlow()
@@ -153,7 +160,7 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         currentRoomId.flatMapLatest { id ->
             if (id == null) flowOf(emptyList()) else analysisRepo.speakers(id)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
+    
     /** 저장 함수 */
     fun saveRecordingForCurrentRoom(filePath: String, peak: Float, rms: Float, duration: Float) =
         viewModelScope.launch {
@@ -234,6 +241,19 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         _speakers.removeAll { (frameNs - it.lastSeenNs) / 1e9 > timeoutSec }
         _speakersVersion.value = _speakersVersion.value + 1
     }
+
+    /**
+     * 현재 Measure3DResult(frame)가 설정되어 있다면,
+     * world 좌표(FloatArray[3])를 Room Local(Vec3)로 변환한다.
+     * (없으면 null)
+     */
+    fun worldToRoomLocal(world: FloatArray): Vec3? {
+        val m = measure3DResult.value ?: return null
+        return m.frame.worldToLocal(
+            Vec3(world[0], world[1], world[2])
+        )
+    }
+
 
     // 방별 수동 스피커 좌표 (로컬 좌표, m)
     private val _manualSpeakers = MutableStateFlow<Map<Int, List<Vec3>>>(emptyMap())
@@ -424,8 +444,39 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
+    /** 깊이(앞↔뒤) 측정에서 얻은 두 점(world 기준 Vec3)를 저장 */
+    fun setDepthPoints(a: Vec3, b: Vec3) {
+        _pickedPoints.value = _pickedPoints.value.copy(zMin = a, zMax = b)
+        tryBuildMeasure3DResult()
+    }
 
+    /** 높이(바닥↔천장) 측정에서 얻은 두 점 저장 */
+    fun setHeightPoints(a: Vec3, b: Vec3) {
+        _pickedPoints.value = _pickedPoints.value.copy(yFloor = a, yCeil = b)
+        tryBuildMeasure3DResult()
+    }
 
+    /** 폭(왼↔오른쪽 벽) 측정에서 얻은 두 점 저장 */
+    fun setWidthPoints(a: Vec3, b: Vec3) {
+        _pickedPoints.value = _pickedPoints.value.copy(xMin = a, xMax = b)
+        tryBuildMeasure3DResult()
+    }
 
+    private fun tryBuildMeasure3DResult() {
+        val pts = _pickedPoints.value
+        if (!pts.isComplete()) return
+
+        val result = pts.toMeasure3DResultOrNull() ?: return
+
+        // 1) ViewModel 내부 상태 갱신
+        _measure3DResult.value = result
+
+        // 2) RoomSize(m)도 방별로 같이 기록
+        val roomId = currentRoomId.value
+        if (roomId != null) {
+            _manualRoomSize.value =
+                _manualRoomSize.value + (roomId to RoomSize(result.width, result.depth, result.height))
+        }
+    }
 
 }

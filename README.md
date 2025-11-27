@@ -112,7 +112,7 @@ RoomAcoustic 프로젝트는 기능별로 모듈화되어 있으며, 각 모듈�
 *   **`SimpleTracker.kt`**: 3D 공간에서 스피커 객체를 추적하고 고유 ID를 할당하는 간단한 트래커입니다.
 
 ### 11. `util` 패키지
-*   `AngleUtils`, `AudioViz`, `CameraPermissionGate`, `DepthUtil`, `GeometryUtil`, `ImageUtils`, `MeasureDisplayFormatter`, `PromptLoader`, `RetrofitClient`, `SpeakerShotCache`, `ViewAnimation`, `YuvToRgbConverter` 등 다양한 유틸리티 함수 및 클래스를 포함하여 특정 기능을 지원합니다.
+*   `AcousticAnalysis`, `AudioViz`, `DepthUtil`, `PromptLoader`, `RetrofitClient` 등 핵심적인 유틸리티 함수 및 클래스를 포함하여 특정 기능을 지원합니다.
 *    특히, `AcousticAnalysis` 는 녹음된 음원으로부터 잔향 시간(RT60)과 명료도(C50/C80)를 계산하는 핵심 신호 처리 알고리즘을 포함합니다.
 ---
 
@@ -176,6 +176,9 @@ OPENAI_API_KEY="YOUR_API_KEY_HERE"
 *   **네비게이션 시작/경로**: 측정 플로우의 시작점을 `CameraGuideScreen`으로 명시하고, `RenderScreen`의 `detected` 기본값 분기 처리를 추가했습니다.
 *   **청취 위치 평가 저장**: `RoomAnalysisScreen`에서 탑다운 캔버스, 4종 메트릭, 스피커 이동 제안을 안내하고 확인 시 ListeningEval을 DB(`listening_eval`)에 저장합니다.
 *   **DB 스키마 확장**: `AppDatabase`를 version 3으로 올리고 `ListeningEvalEntity/Dao`를 추가했으며, 레포지토리/뷰모델에서 평가 CRUD를 처리하도록 반영했습니다.
+
+### 25.11.27
+*   **코드베이스 정리**: 프로젝트 내에서 사용되지 않는 `util` 패키지의 다수 유틸리티 파일(`AngleUtils`, `CameraPermissionGate`, `GeometryUtil`, `ImageUtils`, `MeasureDisplayFormatter`, `SpeakerShotCache`, `ViewAnimation`, `YuvToRgbConverter`)을 삭제하여 코드베이스를 경량화하고 가독성을 높였습니다.
 
 
 

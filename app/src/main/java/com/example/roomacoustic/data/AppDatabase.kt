@@ -12,8 +12,9 @@ import androidx.room.RoomDatabase
         MeasureEntity::class,              // ★ 추가
         SpeakerEntity::class,               // ★ 추가
         ListeningEvalEntity::class,
+        ChatMessageEntity::class,
     ],
-    version = 3,                           // ★ 기존보다 +1
+    version = 4,                           // ★ 기존보다 +1
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +27,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun measureDao(): MeasureDao
     abstract fun speakerDao(): SpeakerDao
     abstract fun listeningEvalDao(): ListeningEvalDao
+    abstract fun chatDao(): ChatDao
 
 
     companion object {

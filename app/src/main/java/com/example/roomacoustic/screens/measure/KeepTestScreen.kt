@@ -17,7 +17,6 @@ import com.example.roomacoustic.audio.TestConfig
 import com.example.roomacoustic.viewmodel.RoomViewModel
 import kotlinx.coroutines.launch
 import java.io.File
-import com.example.roomacoustic.navigation.Screen
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -122,9 +121,9 @@ fun KeepTestScreen(
                 Text("• Peak: ${String.format("%.1f", peak)} dBFS")
                 Text("• RMS:  ${String.format("%.1f", rms)} dBFS")
                 Spacer(Modifier.height(6.dp))
-                Text("파일")
-                Text("• 재생 신호: $playPath")
-                Text("• 녹음 신호: $recPath")
+                //Text("파일")
+                //Text("• 재생 신호: $playPath")
+                //Text("• 녹음 신호: $recPath")
                 Spacer(Modifier.height(12.dp))
 
                 // ★ Analysis 로 이동 (딥링크 금지! 그래프에 등록된 route 그대로)

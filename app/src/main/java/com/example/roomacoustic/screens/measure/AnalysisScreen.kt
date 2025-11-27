@@ -133,7 +133,7 @@ fun AnalysisScreen(
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                ) {/*
                     Text(
                         text = latestMeasure?.let {
                             "W ${"%.2f".format(it.width)} · D ${"%.2f".format(it.depth)} · H ${"%.2f".format(it.height)} (m)"
@@ -141,14 +141,14 @@ fun AnalysisScreen(
                         style = MaterialTheme.typography.bodyMedium
                     )
                     Text("스피커: ${savedSpeakers.size}개", style = MaterialTheme.typography.bodyMedium)
-                }
+                */}
                 Spacer(Modifier.height(12.dp))
 
                 // 본문: 녹음 파일 & 스펙트로그램
                 if (wavPath.isNullOrBlank()) {
                     Text("저장된 녹음이 없습니다.", color = MaterialTheme.colorScheme.error)
                 } else {
-                    Text("파일: ${wavPath.substringAfterLast('/')}")
+                    //Text("파일: ${wavPath.substringAfterLast('/')}")
                     Spacer(Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = { playWav(wavPath) }) { Text("녹음 파일 재생") }

@@ -1,7 +1,7 @@
 package com.example.roomacoustic.screens.measure
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
+
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,9 +26,7 @@ import kotlin.math.min
 import kotlin.math.roundToInt
 import androidx.compose.material3.TopAppBar
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.geometry.CornerRadius
+
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
@@ -563,7 +561,7 @@ private fun evaluateListeningSetup(
         floor = 40
     )
     if (m1Score < 100) {
-        notes += "청취 깊이는 방 깊이의 30~45% 권장(≈ ${fmt(bandMin)}~${fmt(bandMax)} m)."
+        notes += "청취 깊이는 방 깊이의 30~45% 권장( ${fmt(bandMin)}~${fmt(bandMax)} m)."
         // 권장 청취 깊이: 밴드 중앙(= 37.5%)
         suggestListener = (suggestListener ?: listener).copy(z = (bandMin + bandMax) * 0.5f)
     }
@@ -602,7 +600,7 @@ private fun evaluateListeningSetup(
             floor  = 40
         )
         if (m2Score < 100) {
-            notes += "두 스피커의 중앙이 방 중앙선(W/2)에 가깝도록 좌/우를 맞추세요."
+            notes += "두 스피커의 중앙이 방 중앙에 가깝도록 좌우를 맞추세요."
             val shift = centerX - midX
             val lTo = L.copy(x = (L.x + shift).coerceIn(sideMin, room.w - sideMin))
             val rTo = R.copy(x = (R.x + shift).coerceIn(sideMin, room.w - sideMin))
@@ -626,7 +624,7 @@ private fun evaluateListeningSetup(
             floor  = 50
         )
         if (m3Score < 100) {
-            notes += "두 스피커의 전후(z)를 맞추면 스테레오 이미징이 좋아집니다."
+            notes += "두 스피커의 앞 뒤를 맞추면 스테레오 이미징이 좋아집니다."
             val avgZ = ((L.z + R.z) * 0.5f).coerceIn(backMin, backMax.coerceAtMost(room.d - 0.2f))
             val lBase = moves.find { it.index == lIdx }?.to ?: L
             val rBase = moves.find { it.index == rIdx }?.to ?: R
@@ -634,7 +632,7 @@ private fun evaluateListeningSetup(
             moves += MoveSuggestion(rIdx, "R", rBase, rBase.copy(z = avgZ))
         }
         metrics += EvalMetric(
-            name = "전후(z) 일치",
+            name = "전후 일치",
             score = m3Score,
             weight = 2,
             detail = "|zL - zR| = ${fmt(dz)}m"
@@ -667,7 +665,7 @@ private fun evaluateListeningSetup(
         )
 
         val m4Score = ((isoScore + eqScore) / 2f).roundToInt().coerceIn(0, 100)
-        if (isoScore < 100) notes += "좌/우 스피커-청취자 거리 편차를 줄이면 등변에 가까워집니다."
+        if (isoScore < 100) notes += "좌/우 스피커 - 청취자 거리 편차를 줄이면 등변에 가까워집니다."
         if (eqScore  < 100) notes += "스피커 간 거리와 청취자 거리의 밸런스를 더 맞춰 보세요."
         metrics += EvalMetric(
             name = "삼각형 균형",
@@ -681,10 +679,10 @@ private fun evaluateListeningSetup(
             val res = mutableListOf<String>()
             val left = p.x; val right = room.w - p.x
             val back = room.d - p.z; val front = p.z
-            if (min(left, right) < sideMin) res += "측면 벽과 ≥ ${fmt(sideMin)}m 이격 권장."
-            if (back < backMin)           res += "뒤 벽과 ≥ ${fmt(backMin)}m 이격 권장."
-            if (back > backMax)           res += "뒤 벽과 ≤ ${fmt(backMax)}m 권장."
-            if (front < 0.20f)            res += "전면(청취자쪽) 여유가 너무 적습니다(≥0.2m 권장)."
+            if (min(left, right) < sideMin) res += "양쪽 벽에서 ${fmt(sideMin)}m 보다 멀리 두기."
+            if (back < backMin)           res += "뒤쪽 벽에서 ${fmt(backMin)}m 보다 멀리 두기."
+            if (back > backMax)           res += "뒤쪽 벽에서 ${fmt(backMax)}m 보다 가까이 두기."
+            if (front < 0.20f)            res += "앞쪽 벽의 여유가 너무 적습니다(0.2m 보다 큰 걸 권장)."
             return res
         }
         val lFinal = moves.find { it.index == lIdx }?.to ?: L

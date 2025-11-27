@@ -1,10 +1,6 @@
 package com.example.roomacoustic.screens.measure
 
-import android.opengl.GLES20
-import android.opengl.GLSurfaceView
-import android.opengl.Matrix
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -12,20 +8,18 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
+
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
+
 import androidx.navigation.NavController
 import com.example.roomacoustic.model.Vec3
 import com.example.roomacoustic.navigation.Screen
 import com.example.roomacoustic.viewmodel.RoomViewModel
 import kotlin.math.*
-import javax.microedition.khronos.egl.EGLConfig
-import javax.microedition.khronos.opengles.GL10
+
 import androidx.compose.ui.graphics.Color
 import com.example.roomacoustic.screens.components.RoomViewport3DGL
 import com.example.roomacoustic.screens.components.RoomSize
@@ -34,7 +28,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.runtime.saveable.Saver
+
+import com.example.roomacoustic.util.inferRoomSizeFromLabels
 
 
 @Composable
@@ -72,22 +67,13 @@ fun RenderScreen(
     val roomSize = manualSize ?: autoRoomSize
 
     // 월드→로컬(W, H, D) 변환
-    val toLocal: (FloatArray) -> Vec3? = remember(frame3D) {
-        { p ->
-            frame3D?.let { m ->
-                val origin = m.frame.origin
-                val vx = m.frame.vx
-                val vy = m.frame.vy
-                val vz = m.frame.vz
-                val d = Vec3(p[0], p[1], p[2]) - origin
-                Vec3(d.dot(vx), d.dot(vy), d.dot(vz))
-            }
-        }
-    }
-
-    // 1) 월드 → 로컬
+    // - ARCore world(Speaker3D.worldPos) → Room Local(Vec3, 0~W/0~H/0~D)
     val speakersLocalRaw = remember(speakers, frame3D) {
-        speakers.mapNotNull { sp -> toLocal(sp.worldPos) }
+        val frame = frame3D?.frame ?: return@remember emptyList<Vec3>()
+        speakers.map { sp ->
+            val w = sp.worldPos
+            frame.worldToLocal(Vec3(w[0], w[1], w[2]))
+        }
     }
 
     // 2) 근접 중복 제거(10cm 미만은 같은 점 처리)
@@ -109,6 +95,7 @@ fun RenderScreen(
     var showSpeakerInput by rememberSaveable { mutableStateOf(false) }
 
     val speakersForRender: List<Vec3> = manualSpks ?: speakersLocal
+
 
     Column(
         Modifier
@@ -304,30 +291,6 @@ fun RenderScreen(
 
 }
 
-/* ──────────────────────────────────────────── */
-/* 강건한 레이블 매칭                          */
-/* ──────────────────────────────────────────── */
-
-private fun normalizeLabel(s: String): String =
-    s.lowercase().replace("\\s+".toRegex(), "")
-        .replace("[()\\[\\]{}:：=~_\\-]".toRegex(), "")
-
-private val W_KEYS = setOf("w", "width", "가로", "폭", "넓이")
-private val D_KEYS = setOf("d", "depth", "세로", "길이", "방길이", "방깊이", "전장", "장변")
-private val H_KEYS = setOf("h", "height", "높이", "천장", "층고")
-
-private fun inferRoomSizeFromLabels(
-    labeled: List<RoomViewModel.LabeledMeasure>
-): RoomSize? {
-    if (labeled.isEmpty()) return null
-    fun pick(keys: Set<String>): Float? =
-        labeled.firstOrNull { m ->
-            val norm = normalizeLabel(m.label)
-            keys.any { k -> norm.contains(k) || k.contains(norm) }
-        }?.meters
-    val w = pick(W_KEYS); val d = pick(D_KEYS); val h = pick(H_KEYS)
-    return if (w != null && d != null && h != null) RoomSize(w, d, h) else null
-}
 
 /* ──────────────────────────────────────────── */
 /* 수동 입력                                   */
@@ -393,8 +356,6 @@ private fun RoomSizeInputDialog(
 /* ──────────────────────────────────────────── */
 
 private fun fmt(v: Float) = String.format("%.2f", v)
-private operator fun Vec3.minus(o: Vec3) = Vec3(x - o.x, y - o.y, z - o.z)
-private fun Vec3.dot(o: Vec3) = x * o.x + y * o.y + z * o.z
 
 /* ── 새로 추가된 도우미 ── */
 
@@ -647,29 +608,3 @@ private fun <T> SegmentedRow(
         }
     }
 }
-
-@Composable
-private fun NumberField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    label: String,
-    supporting: String,
-    modifier: Modifier = Modifier
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = { s ->
-            if (s.isEmpty() || s.all { it.isDigit() }) onValueChange(s)
-        },
-        label = { Text(label) },
-        supportingText = { Text(supporting) },
-        singleLine = true,
-        keyboardOptions = KeyboardOptions(
-            keyboardType = KeyboardType.Number,
-            imeAction = ImeAction.Next
-        ),
-        modifier = modifier   // ✅ weight 제거
-    )
-}
-
-

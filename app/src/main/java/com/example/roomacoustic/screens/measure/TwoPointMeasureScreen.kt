@@ -17,7 +17,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.zIndex
-import androidx.lifecycle.LifecycleOwner
+
 import androidx.navigation.NavController
 import com.google.ar.core.Config
 import com.google.ar.core.Frame
@@ -34,7 +34,7 @@ fun TwoPointMeasureScreen(
     title: String,                  // 상단 안내 제목
     labelKey: String,               // 저장 라벨("폭","깊이","높이")
     nextRoute: String,              // 다음 화면 route
-    onSave: (Float) -> Unit         // 저장 콜백(vm.addLabeledMeasure)
+    onSave: (Float, Vec3, Vec3) -> Unit   // 🔥 거리 + 두 점(World 좌표)
 ) {
     val ctx = LocalContext.current
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
@@ -53,6 +53,8 @@ fun TwoPointMeasureScreen(
     var viewH by remember { mutableIntStateOf(0) }
 
     var firstPoint by remember { mutableStateOf<Vec3?>(null) }
+    var secondPoint by remember { mutableStateOf<Vec3?>(null) }
+
     var hoverPoint by remember { mutableStateOf<Vec3?>(null) }
     var firstScreen by remember { mutableStateOf<Offset?>(null) }
     var hoverScreen by remember { mutableStateOf<Offset?>(null) }
@@ -110,7 +112,7 @@ fun TwoPointMeasureScreen(
             modifier = Modifier.align(Alignment.BottomCenter).padding(12.dp).zIndex(4f),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            TextButton(onClick = { firstPoint=null; firstScreen=null; hoverPoint=null; hoverScreen=null }) {
+            TextButton(onClick = { firstPoint=null; firstScreen=null; secondPoint = null; hoverPoint=null; hoverScreen=null }) {
                 Text("다시 지정")
             }
             Spacer(Modifier.width(12.dp))
@@ -124,11 +126,16 @@ fun TwoPointMeasureScreen(
                 text  = { Text("측정값: ${"%.2f".format(lastDist)} m") },
                 confirmButton = {
                     TextButton(onClick = {
-                        onSave(lastDist)
+                        val p1 = firstPoint
+                        val p2 = secondPoint
+                        if (p1 != null && p2 != null) {
+                            onSave(lastDist, p1, p2)
+                        }
                         showDialog = false
                         nav.navigate(nextRoute)
                     }) { Text("저장 후 다음") }
                 },
+
                 dismissButton = { TextButton(onClick = { showDialog = false }) { Text("취소") } }
             )
         }
@@ -144,10 +151,14 @@ fun TwoPointMeasureScreen(
                 taps.forEach { pt ->
                     val p = hitTestOrDepth(frame, pt.x, pt.y) ?: return@forEach
                     if (firstPoint == null) {
-                        firstPoint  = p
+                        // 첫 번째 점
+                        firstPoint = p
+                        secondPoint = null
                     } else {
-                        lastDist    = distanceMeters(firstPoint!!, p)
-                        showDialog  = true
+                        // 두 번째 점
+                        secondPoint = p
+                        lastDist = distanceMeters(firstPoint!!, p)
+                        showDialog = true
                     }
                 }
             }

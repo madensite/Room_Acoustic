@@ -22,4 +22,7 @@ interface RoomDao {
     /* ★ 모든 방 삭제 */
     @Query("DELETE FROM rooms")
     suspend fun deleteAll()
+
+    @Query("UPDATE rooms SET hasChat = :hasChat WHERE id = :roomId")
+    suspend fun updateHasChat(roomId: Int, hasChat: Boolean)
 }

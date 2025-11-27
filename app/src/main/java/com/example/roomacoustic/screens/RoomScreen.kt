@@ -15,7 +15,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.runtime.remember
+
 import androidx.navigation.NavController
 import com.example.roomacoustic.data.RoomEntity
 import com.example.roomacoustic.navigation.Screen
@@ -38,6 +39,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.roomacoustic.data.AppDatabase
+import com.example.roomacoustic.repo.ChatRepository
+import com.example.roomacoustic.viewmodel.ChatViewModel
+import com.example.roomacoustic.viewmodel.ChatViewModelFactory
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -47,6 +53,17 @@ fun RoomScreen(
     vm: RoomViewModel
 ) {
     val appCtx = LocalContext.current.applicationContext
+
+    // 1) DB + Repository 준비 (remember로 한 번만 생성)
+    val chatRepository = remember {
+        val db = AppDatabase.get(appCtx)
+        ChatRepository(db.chatDao())
+    }
+
+    // 2) Factory에 repo를 넣어 ViewModel 생성
+    val chatVm: ChatViewModel = viewModel(
+        factory = ChatViewModelFactory(chatRepository)
+    )
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -79,7 +96,6 @@ fun RoomScreen(
     var showNameConflictAlert by remember { mutableStateOf(false) }
 
     var showDeleteAllConfirm  by remember { mutableStateOf(false) }
-    var isLongPress           by remember { mutableStateOf(false) }
 
     var fabExpanded by remember { mutableStateOf(false) }   // 메뉴 열림 여부
 
@@ -142,6 +158,13 @@ fun RoomScreen(
     ) { pad ->
         LazyColumn(contentPadding = pad) {
             items(rooms, key = { it.id }) { room ->
+
+                // 이 방에 대화가 있는지 DB에서 가져와서 State로 보관
+                var hasChat by remember(room.id) { mutableStateOf(false) }
+                LaunchedEffect(room.id, rooms.size) {
+                    hasChat = chatRepository.hasConversation(room.id)
+                }
+
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -153,7 +176,13 @@ fun RoomScreen(
                 ) {
                     ListItem(
                         headlineContent = { Text(room.title) },
-                        trailingContent = { StatusChips(room.hasMeasure, room.hasChat) },
+                        trailingContent = {
+                            // ✅ room.hasChat 대신 hasChat 사용
+                            StatusChips(
+                                hasMeasure = room.hasMeasure,
+                                hasChat = hasChat
+                            )
+                        },
                         supportingContent = {
                             val sub = room.lastChatPreview
                                 ?: if (room.hasMeasure) "측정 완료" else "미측정"
@@ -162,6 +191,7 @@ fun RoomScreen(
                     )
                 }
             }
+
         }
     }
 
@@ -181,10 +211,15 @@ fun RoomScreen(
         )
     }
 
-
     /* ───── 짧게 터치 모달 (상태 기반) ───── */
     tappedRoom?.let { room ->
         vm.select(room.id)
+
+        var hasChat by remember(room.id) { mutableStateOf(false) }
+        LaunchedEffect(room.id) {
+            hasChat = chatRepository.hasConversation(room.id)
+        }
+
         ModalBottomSheet(onDismissRequest = { tappedRoom = null }) {
             if (!room.hasMeasure) {
                 SheetItem("측정 시작") {
@@ -208,19 +243,24 @@ fun RoomScreen(
                 }
             }
 
-            if (!room.hasChat) {
+            if (!hasChat) {
                 SheetItem("새 대화") {
                     tappedRoom = null
-                    nav.navigate(Screen.NewChat.route.replace("{roomId}", room.id.toString()))
+                    nav.navigate(
+                        Screen.NewChat.route.replace("{roomId}", room.id.toString())
+                    )
                 }
             } else {
                 SheetItem("기존 대화 이어가기") {
                     tappedRoom = null
-                    nav.navigate(Screen.ExChat.route.replace("{roomId}", room.id.toString()))
+                    nav.navigate(
+                        Screen.ExChat.route.replace("{roomId}", room.id.toString())
+                    )
                 }
             }
         }
     }
+
 
     // 삭제 확인 Dialog 추가
     if (showDeleteConfirm && roomToDelete != null) {

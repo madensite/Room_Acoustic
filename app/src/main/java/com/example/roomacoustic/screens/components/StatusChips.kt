@@ -9,17 +9,21 @@ import androidx.compose.ui.unit.dp
 
 @Composable
 fun StatusChips(hasMeasure: Boolean, hasChat: Boolean) {
+    // 1. 원하는 어두운 톤의 색상을 정의합니다.
+    val DarkRed = Color(0xFFB71C1C)   // 차분하고 진한 빨강
+    val DarkGreen = Color(0xFF2E7D32) // 형광기가 빠진 짙은 초록 (Forest Green)
+
     Column {
         AssistChip(
             onClick = {},
             label = { Text("측정") },
             colors = if (hasMeasure)
                 AssistChipDefaults.assistChipColors(
-                    containerColor = Color.Red,
-                    labelColor = Color.White            // ★ 글씨 흰색
+                    containerColor = DarkRed, // 수정된 색상 적용
+                    labelColor = Color.White
                 )
             else AssistChipDefaults.assistChipColors(
-                labelColor = Color.Gray                // 선택 안 됐을 때 회색 글씨 (옵션)
+                labelColor = Color.Gray
             )
         )
         Spacer(Modifier.height(4.dp))
@@ -28,7 +32,7 @@ fun StatusChips(hasMeasure: Boolean, hasChat: Boolean) {
             label = { Text("대화") },
             colors = if (hasChat)
                 AssistChipDefaults.assistChipColors(
-                    containerColor = Color.Green,
+                    containerColor = DarkGreen, // 수정된 색상 적용
                     labelColor = Color.White
                 )
             else AssistChipDefaults.assistChipColors(

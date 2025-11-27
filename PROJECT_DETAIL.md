@@ -6,7 +6,7 @@
 
 RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) 아키텍처를 따르며, Jetpack Navigation Compose를 사용하여 화면 간의 이동을 관리합니다. 앱의 주요 흐름은 다음과 같습니다.
 
-1.  **스플래시 화면 (`SplashScreen.kt`)**:
+1.  **스플래시 화면 (`SplashScreen.kt`)**:dkssud. 
     *   앱 실행 시 가장 먼저 표시되는 화면입니다.
     *   `LaunchedEffect`를 사용하여 1초간 대기한 후, `RoomScreen`으로 자동 이동합니다.
     *   이때 `popUpTo(Screen.Splash.route) { inclusive = true }` 옵션을 사용하여 스플래시 화면을 백스택에서 제거하여 사용자가 뒤로 가기 버튼으로 돌아올 수 없도록 합니다.
@@ -22,11 +22,14 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
     *   **화면 전환**:
         *   "측정 시작" 또는 "재측정하기" 선택 시 `Screen.MeasureGraph.route` (측정 플로우 서브그래프)로 이동합니다.
         *   "새 대화" 또는 "기존 대화 이어가기" 선택 시 `Screen.NewChat.route` 또는 `Screen.ExChat.route` (채팅 화면)으로 이동합니다.
-        *   "측정 결과 보기" 선택 시 `Screen.Render.route` (3D 렌더링 화면)으로 이동합니다.
 
 3.  **측정 플로우 (서브그래프 `Screen.MeasureGraph`)**:
     *   `MainActivity.kt`의 `NavHost` 내에 `navigation` 블록으로 정의된 서브그래프입니다.
-    *   **순서**: `MeasureWidthScreen` -> `MeasureDepthScreen` -> `MeasureHeightScreen` -> `DetectSpeakerScreen` -> `RenderScreen` -> `TestGuideScreen` -> `KeepTestScreen` -> `AnalysisScreen`
+    *   **순서**: `CameraGuideScreen` -> `MeasureWidthScreen` -> `MeasureDepthScreen` -> `MeasureHeightScreen` -> `DetectSpeakerScreen` -> `RenderScreen` -> `RoomAnalysisScreen` -> `TestGuideScreen` -> `KeepTestScreen` -> `AnalysisScreen`
+    *   **`CameraGuideScreen.kt` (AR 테스트 가이드)**:
+        *   공간 측정을 위한 가이드라인을 사용자에게 제공합니다.
+        *   "AR 분석" 버튼 클릭 시 `MeasureWidthScreen`으로 이동합니다.
+        *   "카메라 없이" 버튼 클릭 시 `RenderScreen`으로 이동합니다.
     *   **`TwoPointMeasureScreen.kt` (폭, 깊이, 높이 측정)**:
         *   `MeasureWidthScreen`, `MeasureDepthScreen`, `MeasureHeightScreen`은 `TwoPointMeasureScreen` 컴포저블을 재사용합니다.
         *   ARCore의 `RAW_DEPTH_ONLY` 모드를 사용하여 두 지점 간의 거리를 측정합니다.
@@ -39,7 +42,11 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
     *   **`RenderScreen.kt` (3D 시각화)**:
         *   측정된 방 크기와 탐지된 스피커의 3D 위치를 OpenGL ES 2.0을 사용하여 3D로 시각화합니다.
         *   사용자는 드래그 및 핀치 제스처로 3D 뷰를 회전하고 확대/축소할 수 있습니다.
-        *   "다음" 버튼 클릭 시 `TestGuideScreen`으로 이동합니다.
+        *   "다음" 버튼 클릭 시 `RoomAnalysisScreen`으로 이동합니다.
+    *   **`RoomAnalysisScreen.kt` (공간 및 스피커 2D 시각화 및 분석)**:
+        *   측정된 방 크기와 탐지된 스피커의 2D 위치를 시각화합니다.
+        *   2D 시각화 화면에서 청취자의 위치를 선정하고 그에 맞는 청취 환경 점수를 확인합니다. 
+        *   "다음" 버튼 클릭 시 모달 액션을 통한 최종 정보 확인 후 `TestGuideScreen`으로 이동합니다.
     *   **`TestGuideScreen.kt` (테스트 가이드)**:
         *   음향 측정을 위한 가이드라인을 사용자에게 제공합니다.
         *   "테스트 시작" 버튼 클릭 시 `KeepTestScreen`으로 이동합니다.
@@ -54,7 +61,7 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
 
 4.  **채팅 화면 (`ChatScreen.kt`)**:
     *   `RoomScreen`에서 "새 대화" 또는 "기존 대화 이어가기" 선택 시 진입합니다.
-    *   `PromptLoader`를 통해 `assets/prompt/prompt001.txt`에서 시스템 프롬프트를 로드합니다.
+    *   `PromptLoader`를 통해 `assets/prompt/`에서 `chat_system.txt`, `chat_bootstrap.txt`, `chat_user_wrapper.txt`, `prompt004.txt` 프롬프트를 로드합니다.
     *   `ChatViewModel`을 통해 OpenAI API와 통신하여 AI 챗봇과 대화합니다.
     *   사용자 메시지와 GPT 응답을 `LazyColumn`으로 표시하며, 최신 메시지가 항상 하단에 보이도록 자동 스크롤됩니다.
 
@@ -311,17 +318,11 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
 
 ### 2.21. `util` 패키지 (다양한 유틸리티)
 
-*   **`AngleUtils.kt`**: ARCore `Pose`에서 yaw 각도를 계산하고, 두 각도 간의 차이를 계산하는 유틸리티.
+*   **`AcousticAnalysis.kt`**: `computeAcousticMetrics`를 포함하며, 녹음된 음원으로부터 잔향 시간(RT60), 명료도(C50/C80) 등 핵심 음향 지표를 계산하는 알고리즘을 제공합니다.
 *   **`AudioViz.kt`**: WAV 파일 읽기(`readMono16Wav`), 스펙트로그램 계산(`computeSpectrogram`), 스펙트로그램을 비트맵으로 변환(`spectrogramToBitmap`), WAV 파일 재생(`playWav`) 기능을 제공하는 음향 시각화 유틸리티.
-*   **`CameraPermissionGate.kt`**: 카메라 권한이 없을 경우 요청하고, 권한이 허용될 때만 콘텐츠를 표시하는 Compose 컴포저블.
 *   **`DepthUtil.kt`**: `DEPTH16` 이미지를 사용하여 2D 바운딩 박스 중심점을 3D 월드 좌표로 변환하는 유틸리티.
-*   **`GeometryUtil.kt`**: `PickedPoints`를 기반으로 `AxisFrame` 및 방 크기를 계산하고, 측정값의 유효성을 검사하는 기하학 유틸리티.
-*   **`ImageUtils.kt`**: `Bitmap`을 안드로이드 `Pictures/` 디렉토리에 JPEG 형식으로 저장하고 `Uri`를 반환하는 유틸리티.
-*   **`MeasureDisplayFormatter.kt`**: 측정된 길이를 미터 또는 피트/인치 형식으로 포맷하는 `sealed interface` 및 구현체.
 *   **`PromptLoader.kt`**: `assets/prompt`의 `chat_system.txt`, `chat_bootstrap.txt`, `chat_user_wrapper.txt`, `prompt004.txt`를 읽어 조합하는 유틸리티.
-*   **`SpeakerShotCache.kt`**: 스피커 탐지 시 촬영된 이미지의 `Uri`를 임시로 캐시하는 `ConcurrentHashMap` 기반의 싱글톤 객체.
-*   **`ViewAnimation.kt`**: `View`에 플립 애니메이션을 적용하는 확장 함수.
-*   **`YuvToRgbConverter.kt`**: CameraX의 `Image` 객체(YUV_420_888 형식)를 RGB `Bitmap`으로 효율적으로 변환하는 유틸리티.
+*   **`RetrofitClient.kt`**: `Retrofit` 인스턴스를 생성하여 OpenAI API와의 통신을 설정하는 객체입니다.
 
 ### 2.22. `ui.theme` 패키지 (`Color.kt`, `Theme.kt`, `Type.kt`)
 
@@ -435,3 +436,16 @@ RoomAcoustic 앱은 Jetpack Compose 기반의 단일 Activity (`MainActivity`) �
 - **네비게이션 시작/경로**: 측정 플로우의 시작점을 `CameraGuideScreen`으로 명시하고, `RenderScreen`의 `detected` 기본값 분기 처리를 추가했습니다.
 - **청취 위치 평가 저장**: `RoomAnalysisScreen`에서 탑다운 캔버스, 4종 메트릭, 스피커 이동 제안을 안내하고 확인 시 ListeningEval을 DB(`listening_eval`)에 저장합니다.
 - **DB 스키마 확장**: `AppDatabase`를 version 3으로 올리고 `ListeningEvalEntity/Dao`를 추가했으며, 레포지토리/뷰모델에서 평가 CRUD를 처리하도록 반영했습니다.
+
+### 4.5 25.11.27. 리팩토링
+
+#### 코드 구조 리팩토링
+- **`util` 패키지 정리**: 프로젝트 내에서 더 이상 사용되지 않는 유틸리티 클래스들을 대거 삭제하여 코드베이스를 정리했습니다.
+  - 삭제된 파일: `AngleUtils.kt`, `CameraPermissionGate.kt`, `GeometryUtil.kt`, `ImageUtils.kt`, `MeasureDisplayFormatter.kt`, `SpeakerShotCache.kt`, `ViewAnimation.kt`, `YuvToRgbConverter.kt`
+- **`CameraX` 관련 코드 정리**: `YuvToRgbConverter.kt` 유틸리티가 삭제되었습니다.
+
+### 4.6 25.11.27. 리팩토링 2
+
+#### 챗봇 리팩토링
+- **타이핑 및 로딩 애니메이션 추가**: `ChatScreen.kt` 상에서 OPEN-AI 모델 혹은 사용자가 채팅을 입력할 때, 로딩 애니메이션 및 OPEN-AI의 답변에 타이핑 애니메이션이 추가되었습니다.
+- **`ChatDao`, `ChatMessageEntity`, `ChatRepository` 추가**: 채팅 관련 로컬 저장 로직이 추가되었습니다.

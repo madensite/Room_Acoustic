@@ -11,6 +11,9 @@ fun MeasureHeightScreen(nav: NavController, vm: RoomViewModel) =
         nav = nav,
         title = "높이 측정 (바닥 ↔ 천장)",
         labelKey = "높이",
-        nextRoute = Screen.DetectSpeaker.route,  // ← 수정
-        onSave = { vm.addLabeledMeasure("높이", it) }
+        nextRoute = Screen.DetectSpeaker.route,
+        onSave = { dist, p1, p2 ->
+            vm.addLabeledMeasure("높이", dist)
+            vm.setHeightPoints(p1, p2)
+        }
     )

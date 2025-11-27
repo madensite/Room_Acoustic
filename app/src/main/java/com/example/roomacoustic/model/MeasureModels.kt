@@ -53,7 +53,22 @@ data class AxisFrame(
     val vx: Vec3,   // X 단위벡터
     val vy: Vec3,   // Y 단위벡터(Up)
     val vz: Vec3    // Z 단위벡터
-)
+) {
+    /** AR world → Room local */
+    fun worldToLocal(p: Vec3): Vec3 {
+        val d = p - origin
+        return Vec3(
+            d.dot(vx),
+            d.dot(vy),
+            d.dot(vz)
+        )
+    }
+
+    /** Room local → AR world */
+    fun localToWorld(p: Vec3): Vec3 =
+        origin + vx * p.x + vy * p.y + vz * p.z
+}
+
 
 data class Measure3DResult(
     val frame: AxisFrame,
@@ -78,4 +93,86 @@ data class MeasureValidation(val ok: Boolean, val reason: String? = null) {
         fun ok() = MeasureValidation(true, null)
         fun fail(reason: String) = MeasureValidation(false, reason)
     }
+}
+
+/**
+ * (폭/깊이/높이) 세 화면에서 얻은 6점(PickedPoints)을 바탕으로
+ * - Room 좌표계(AxisFrame)
+ * - width/depth/height
+ * 를 계산한다.
+ *
+ * 여기서 xMin/xMax, zMin/zMax, yFloor/yCeil 은
+ * 실제 "최소/최대"라는 의미보다
+ * "같은 축의 두 점(첫 번째/두 번째)" 정도로만 쓰인다.
+ */
+fun PickedPoints.toMeasure3DResultOrNull(): Measure3DResult? {
+    val xMin = xMin ?: return null
+    val xMax = xMax ?: return null
+    val zMin = zMin ?: return null
+    val zMax = zMax ?: return null
+    val yFloor = yFloor ?: return null
+    val yCeil = yCeil ?: return null
+
+    // 1) 기본 축 벡터(월드 기준)
+    val vxRaw = xMax - xMin          // 좌↔우
+    val vzRaw = zMax - zMin          // 앞↔뒤
+    val vyRaw = yCeil - yFloor       // 바닥↔천장
+
+    if (vxRaw.length() < 1e-3f || vzRaw.length() < 1e-3f || vyRaw.length() < 1e-3f) {
+        return null
+    }
+
+    val vx = vxRaw.normalized()
+
+    // Z축: X에 대해 직교화
+    val vzTmp = vzRaw - vx * vzRaw.dot(vx)
+    if (vzTmp.length() < 1e-3f) return null
+    val vz = vzTmp.normalized()
+
+    // Y축: 우선 vyRaw를 직교화 해보고, 너무 작으면 cross로 대체
+    var vyTmp = vyRaw - vx * vyRaw.dot(vx) - vz * vyRaw.dot(vz)
+    if (vyTmp.length() < 1e-3f) {
+        vyTmp = vx.cross(vz)
+    }
+    val vy = vyTmp.normalized()
+
+    // 2) 각 축 길이 (m)
+    val width  = (xMax - xMin).length()
+    val depth  = (zMax - zMin).length()
+    val height = (yCeil - yFloor).length()
+
+    // 3) origin 계산
+    // xMin을 기준점으로 잡고, zMin, yFloor가 로컬축에서 z=0, y=0이 되도록 평행이동
+    val O0 = xMin
+
+    fun toLocal0(p: Vec3): Vec3 {
+        val d = p - O0
+        return Vec3(
+            d.dot(vx),
+            d.dot(vy),
+            d.dot(vz)
+        )
+    }
+
+    val localZMin0 = toLocal0(zMin)
+    val localYFloor0 = toLocal0(yFloor)
+
+    val deltaY = localYFloor0.y
+    val deltaZ = localZMin0.z
+
+    val origin = O0 + vy * deltaY + vz * deltaZ
+
+    val frame = AxisFrame(
+        origin = origin,
+        vx = vx,
+        vy = vy,
+        vz = vz
+    )
+
+    return Measure3DResult(
+        frame = frame,
+        width = width,
+        depth = depth,
+        height = height
+    )
 }
