@@ -7,7 +7,8 @@ data class ListeningMetric(
 )
 
 data class ListeningEval(
-    val total: Int,                // 0~100 총점
+    val total: Int,
     val metrics: List<ListeningMetric>,
-    val notes: List<String>        // 조언/권고 전체 텍스트
+    val notes: List<String>,
+    val listener: Vec2? = null
 )

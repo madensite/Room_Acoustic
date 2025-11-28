@@ -30,6 +30,11 @@ fun ResultAnalysisScreen(
     vm: RoomViewModel,
     roomId: Int
 ) {
+    // ✅ 이 화면 들어올 때 해당 roomId를 현재 방으로 설정
+    LaunchedEffect(roomId) {
+        vm.select(roomId)
+    }
+
     val latestRec = vm.latestRecording.collectAsState().value
     val latestMeasure = vm.latestMeasure.collectAsState().value
     val savedSpeakers = vm.savedSpeakers.collectAsState().value

@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.update
 import com.example.roomacoustic.model.ListeningEval
 import com.example.roomacoustic.model.PickedPoints
 import com.example.roomacoustic.model.toMeasure3DResultOrNull
+import com.example.roomacoustic.util.AcousticMetrics
 
 
 
@@ -93,6 +94,7 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         // ★ 수동 입력들도 모두 초기화
         _manualSpeakers.value = emptyMap()
         _manualRoomSize.value  = emptyMap()
+        _acousticMetrics.value = emptyMap()
     }
 
     // ── 스피커 변경 버전 카운터 (Render 재구성 트리거)
@@ -160,7 +162,29 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         currentRoomId.flatMapLatest { id ->
             if (id == null) flowOf(emptyList()) else analysisRepo.speakers(id)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    
+
+    // 🔹 방별 최신 청취 평가 (DB → Model)
+    val latestListeningEval: StateFlow<ListeningEval?> =
+        currentRoomId.flatMapLatest { id ->
+            if (id == null) flowOf(null) else analysisRepo.listeningEval(id)
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    // ───── 방별 녹음 기반 음향 지표 (RT60, C50, C80 등) ─────
+    private val _acousticMetrics = MutableStateFlow<Map<Int, AcousticMetrics>>(emptyMap())
+    val acousticMetrics: StateFlow<Map<Int, AcousticMetrics>> = _acousticMetrics.asStateFlow()
+
+    fun setAcousticMetrics(roomId: Int, metrics: AcousticMetrics?) {
+        _acousticMetrics.update { old ->
+            val next = old.toMutableMap()
+            if (metrics == null) next.remove(roomId) else next[roomId] = metrics
+            next
+        }
+    }
+
+    fun acousticMetricsFor(roomId: Int): AcousticMetrics? =
+        _acousticMetrics.value[roomId]
+
+
     /** 저장 함수 */
     fun saveRecordingForCurrentRoom(filePath: String, peak: Float, rms: Float, duration: Float) =
         viewModelScope.launch {
@@ -471,11 +495,71 @@ class RoomViewModel(app: Application) : AndroidViewModel(app) {
         // 1) ViewModel 내부 상태 갱신
         _measure3DResult.value = result
 
-        // 2) RoomSize(m)도 방별로 같이 기록
+        // 2) RoomSize(m)도 방별로 같이 기록 (메모리)
         val roomId = currentRoomId.value
         if (roomId != null) {
+            val size = RoomSize(result.width, result.depth, result.height)
+
             _manualRoomSize.value =
-                _manualRoomSize.value + (roomId to RoomSize(result.width, result.depth, result.height))
+                _manualRoomSize.value + (roomId to size)
+
+            // 3) 🔥 DB에도 측정값 저장 (앱 재실행 후 복원용)
+            viewModelScope.launch {
+                analysisRepo.saveMeasure(
+                    roomId,
+                    result.width,
+                    result.depth,
+                    result.height
+                )
+                // 또는 이미 있는 헬퍼를 쓰고 싶으면:
+                // saveMeasureForCurrentRoom(result.width, result.depth, result.height)
+            }
+        }
+    }
+
+    // ───── 방별 스피커(local 좌표) DB 저장 헬퍼 ─────
+    fun saveLocalSpeakersForCurrentRoom(localSpeakers: List<Vec3>) =
+        viewModelScope.launch {
+            val id = currentRoomId.value ?: return@launch
+            // Vec3(x,y,z)를 FloatArray[3]로 변환해서 기존 replaceSpeakers 재사용
+            analysisRepo.replaceSpeakers(
+                id,
+                localSpeakers.map { sp ->
+                    floatArrayOf(sp.x, sp.y, sp.z)
+                }
+            )
+        }
+
+    fun clearSpeakersForCurrentRoom() =
+        viewModelScope.launch {
+            val id = currentRoomId.value ?: return@launch
+            analysisRepo.replaceSpeakers(id, emptyList())
+        }
+
+
+    init {
+        viewModelScope.launch {
+            currentRoomId
+                .filterNotNull()
+                .collectLatest { roomId ->
+                    latestListeningEval.collect { eval ->
+                        if (eval != null) {
+                            // 1) 평가 맵 동기화
+                            _listeningEval.update { old ->
+                                old + (roomId to eval)
+                            }
+
+                            // 2) 🔹 청취 위치도 같이 복원
+                            eval.listener?.let { lis ->
+                                _manualListener.update { old ->
+                                    val next = old.toMutableMap()
+                                    next[roomId] = lis
+                                    next
+                                }
+                            }
+                        }
+                    }
+                }
         }
     }
 

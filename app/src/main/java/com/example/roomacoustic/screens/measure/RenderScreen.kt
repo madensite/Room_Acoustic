@@ -40,14 +40,16 @@ fun RenderScreen(
 ) {
     val roomId = vm.currentRoomId.collectAsState().value
     if (roomId == null) {
-        Box(Modifier.fillMaxSize()) { CircularProgressIndicator(Modifier.align(Alignment.Center)) }
+        Box(Modifier.fillMaxSize()) {
+            CircularProgressIndicator(Modifier.align(Alignment.Center))
+        }
         return
     }
 
     val labeled = vm.labeledMeasures.collectAsState().value
     val frame3D  = vm.measure3DResult.collectAsState().value
 
-    // 스피커 재구성 트리거
+    // 스피커 재구성 트리거 (AR 탐지용)
     val speakersVersion = vm.speakersVersion.collectAsState(0).value
     val speakers = remember(speakersVersion) { vm.speakers.toList() }
 
@@ -67,7 +69,6 @@ fun RenderScreen(
     val roomSize = manualSize ?: autoRoomSize
 
     // 월드→로컬(W, H, D) 변환
-    // - ARCore world(Speaker3D.worldPos) → Room Local(Vec3, 0~W/0~H/0~D)
     val speakersLocalRaw = remember(speakers, frame3D) {
         val frame = frame3D?.frame ?: return@remember emptyList<Vec3>()
         speakers.map { sp ->
@@ -81,27 +82,39 @@ fun RenderScreen(
         dedupByDistance(speakersLocalRaw, threshold = 0.10f)
     }
 
-    // 3) 방 중심으로 자동 정렬(시각적 안정화; 절대 오프셋은 보정 X)
+    // 3) 방 중심으로 자동 정렬
     val speakersLocal = remember(speakersLocalDedup, roomSize) {
         if (roomSize == null || speakersLocalDedup.isEmpty()) speakersLocalDedup
         else autoCenterToRoom(speakersLocalDedup, roomSize)
     }
 
-
     var showInput by rememberSaveable { mutableStateOf(false) }
     var showDetail by rememberSaveable { mutableStateOf(false) }
-
-    // 수동 입력으로 확정된 스피커들(로컬 좌표). null이면 자동 추론 사용.
     var showSpeakerInput by rememberSaveable { mutableStateOf(false) }
 
-    val speakersForRender: List<Vec3> = manualSpks ?: speakersLocal
+    // 🔹 이 화면에서만 쓰는 "즉시 미리보기용" 수동 스피커 상태
+    var previewSpeakers by remember(roomId) { mutableStateOf<List<Vec3>?>(null) }
 
+    // 🔹 GL 뷰를 강제로 다시 만들기 위한 키
+    var glKey by remember(roomId) { mutableStateOf(0) }
+
+    // VM 쪽에 기존 값이 있으면 처음 진입 시 한 번만 preview에 채워주기
+    LaunchedEffect(roomId, manualSpks) {
+        if (manualSpks != null && previewSpeakers == null) {
+            previewSpeakers = manualSpks
+        }
+    }
+
+    // 🔹 최종 렌더링에 쓸 스피커
+    val speakersForRender: List<Vec3> =
+        previewSpeakers ?: manualSpks ?: speakersLocal
 
     Column(
         Modifier
             .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(16.dp)) {
+            .padding(16.dp)
+    ) {
 
         /* 중앙 3D 뷰포트 */
         Box(
@@ -110,14 +123,15 @@ fun RenderScreen(
                 .weight(1f)
         ) {
             if (roomSize != null) {
-                val clamped = speakersForRender.map { p ->   // ← speakersLocal → speakersForRender
+                val clamped = speakersForRender.map { p ->
                     Vec3(
                         x = p.x.coerceIn(0f, roomSize.w),
                         y = p.y.coerceIn(0f, roomSize.h),
                         z = p.z.coerceIn(0f, roomSize.d)
                     )
                 }
-                key(roomSize to clamped) {
+
+                key(glKey to (roomSize to clamped)) {
                     RoomViewport3DGL(
                         room = roomSize,
                         speakersLocal = clamped,
@@ -137,14 +151,16 @@ fun RenderScreen(
                 )
             }
         }
-
+        /*
         // 디버그 표시
         Text(
             text = "스피커(월드): ${speakers.size} / 로컬 변환: ${speakersLocalRaw.size}" +
-                    (if (frame3D == null) "  [frame3D 없음]" else ""),
+                    (if (frame3D == null) "  [frame3D 없음]" else "") +
+                    " / 렌더: ${speakersForRender.size}",
             color = Color(0xFFB0BEC5),
             style = MaterialTheme.typography.bodySmall
         )
+         */
 
         /* 하단 요약 + 상세정보 버튼 */
         Row(
@@ -152,15 +168,6 @@ fun RenderScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            if (roomSize != null) {
-                Text(
-                    "W ${"%.2f".format(roomSize.w)}m · D ${"%.2f".format(roomSize.d)}m · H ${"%.2f".format(roomSize.h)}m",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color(0xFFEEEEEE)
-                )
-            } else {
-                Text("W/D/H 미지정", style = MaterialTheme.typography.titleMedium)
-            }
             Row {
                 TextButton(onClick = { showDetail = true }) { Text("상세정보") }
 
@@ -174,21 +181,39 @@ fun RenderScreen(
 
                 // 🔹 수동 스피커 해제
                 TextButton(
-                    onClick = { vm.clearManualSpeakers(roomId) },
-                    enabled = manualSpks != null
+                    onClick = {
+                        vm.clearManualSpeakers(roomId)
+                        vm.clearSpeakersForCurrentRoom()
+                        previewSpeakers = null
+                        glKey++   // 뷰도 한 번 리셋
+                    },
+                    enabled = manualSpks != null || previewSpeakers != null
                 ) { Text("수동 스피커 해제") }
 
-                // 🔹 수동 RoomSize 해제 (있으면 노출하고 싶으면 추가)
+                // 🔹 수동 RoomSize 해제
                 TextButton(
                     onClick = { vm.setManualRoomSize(roomId, null) },
                     enabled = manualSize != null
                 ) { Text("수동 RoomSize 해제") }
             }
-
         }
 
         Spacer(Modifier.height(8.dp))
 
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center
+        ){
+            if (roomSize != null) {
+                Text(
+                    "W ${"%.2f".format(roomSize.w)}m · D ${"%.2f".format(roomSize.d)}m · H ${"%.2f".format(roomSize.h)}m",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color(0xFFEEEEEE)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
         /* 중앙 배너 */
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -216,7 +241,11 @@ fun RenderScreen(
             autoRoomSize != null   -> "[자동]"
             else                   -> "[미지정]"
         }
-        val spkTag = if (manualSpks != null) "[수동]" else "[자동]"
+        val spkTag = when {
+            previewSpeakers != null -> "[수동(미리보기)]"
+            manualSpks != null      -> "[수동]"
+            else                    -> "[자동]"
+        }
 
         AlertDialog(
             onDismissRequest = { showDetail = false },
@@ -235,13 +264,12 @@ fun RenderScreen(
                     else {
                         val f = frame3D.frame
                         Text("origin = (${fmt(f.origin.x)}, ${fmt(f.origin.y)}, ${fmt(f.origin.z)})")
-                        Text("vx = (${fmt(f.vx.x)}, ${fmt(f.vy.y)}, ${fmt(f.vz.z)})")
+                        Text("vx = (${fmt(f.vx.x)}, ${fmt(f.vx.y)}, ${fmt(f.vx.z)})")
                         Text("vy = (${fmt(f.vy.x)}, ${fmt(f.vy.y)}, ${fmt(f.vy.z)})")
                         Text("vz = (${fmt(f.vz.x)}, ${fmt(f.vz.y)}, ${fmt(f.vz.z)})")
                     }
 
                     Spacer(Modifier.height(8.dp))
-                    // 🔹 RoomSize 출처
                     Text("RoomSize $sizeTag")
                     when (roomSize) {
                         null -> Text("W/D/H 미지정")
@@ -249,7 +277,6 @@ fun RenderScreen(
                     }
 
                     Spacer(Modifier.height(8.dp))
-                    // 🔹 스피커 출처
                     val listForInfo = speakersForRender
                     Text("스피커(로컬) $spkTag")
                     if (listForInfo.isEmpty()) Text("스피커 없음")
@@ -262,15 +289,14 @@ fun RenderScreen(
         )
     }
 
-
-
     /* 수동 입력 다이얼로그 */
     if (showInput) {
         RoomSizeInputDialog(
             initial = manualSize ?: autoRoomSize,
             onDismiss = { showInput = false },
             onConfirmMeters = { w, d, h ->
-                vm.setManualRoomSize(roomId, RoomSize(w, d, h)) // 🔹 VM에 m로 저장
+                vm.setManualRoomSize(roomId, RoomSize(w, d, h))
+                vm.saveMeasureForCurrentRoom(w, d, h)   // 🔥 DB에도 저장
                 showInput = false
             }
         )
@@ -282,15 +308,23 @@ fun RenderScreen(
             room = roomSize, // (m)
             onDismiss = { showSpeakerInput = false },
             onConfirm = { list -> // list: List<Vec3> in meters
-                vm.setManualSpeakers(roomId, list) // 🔹 VM에 저장
+                // 1) VM에 저장
+                vm.setManualSpeakers(roomId, list)
+                vm.saveLocalSpeakersForCurrentRoom(list)
+
+                // 2) 이 화면에서 즉시 미리보기
+                previewSpeakers = list
+
+                // 3) GL 뷰 강제 리셋
+                glKey++
+
+                // 4) 다이얼로그 닫기
                 showSpeakerInput = false
             }
         )
     }
 
-
 }
-
 
 /* ──────────────────────────────────────────── */
 /* 수동 입력                                   */
@@ -411,9 +445,32 @@ private fun ManualSpeakersDialog(
 
     // ✅ 리스트 자체도 상태 리스트로 유지 (recomposition 시 값 보존)
     val rows = remember { mutableStateListOf<RowState>() }
+
     LaunchedEffect(count) {
-        while (rows.size < count) rows += RowState()
-        while (rows.size > count) rows.removeAt(rows.lastIndex)
+        // 1) rows 크기를 count에 맞춰 조정
+        if (rows.size < count) {
+            repeat(count - rows.size) {
+                rows += RowState()
+            }
+        } else if (rows.size > count) {
+            while (rows.size > count) rows.removeAt(rows.lastIndex)
+        }
+
+        // 2) 아무 값도 안 채워진 행들에만 기본 A/B 패턴 세팅
+        //    A = (LEFT, FRONT, FLOOR)
+        //    B = (RIGHT, FRONT, FLOOR)
+        val leftCount = (count + 1) / 2   // A 개수 (ceil(count/2))
+
+        rows.forEachIndexed { idx, r ->
+            // 사용자가 숫자 안 넣은 “새로운” 행만 기본값 적용
+            val untouched = r.xCm.isEmpty() && r.zCm.isEmpty() && r.yCm.isEmpty()
+            if (untouched) {
+                val useA = idx < leftCount
+                r.sideX = if (useA) SideX.LEFT else SideX.RIGHT
+                r.sideZ = SideZ.FRONT
+                r.sideY = SideY.FLOOR
+            }
+        }
     }
 
     val maxXcm = (room.w * 100).roundToInt()

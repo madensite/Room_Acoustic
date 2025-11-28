@@ -9,6 +9,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import com.example.roomacoustic.model.ListeningEval
 import com.example.roomacoustic.model.ListeningMetric
+import com.example.roomacoustic.model.Vec2
+
 
 class AnalysisRepository(
     private val recDao: RecordingDao,
@@ -71,8 +73,8 @@ class AnalysisRepository(
     }
 
     // ────────────────────────────────
-// 청취 평가 매핑 헬퍼 (파일 내부 전용)
-// ────────────────────────────────
+    // 청취 평가 매핑 헬퍼 (파일 내부 전용)
+    // ────────────────────────────────
 
     private fun ListeningEval.toEntity(roomId: Int): ListeningEvalEntity {
         // metrics 리스트가 4개보다 적더라도 안전하게 채우기
@@ -85,6 +87,8 @@ class AnalysisRepository(
         val m1 = safeMetrics[1]
         val m2 = safeMetrics[2]
         val m3 = safeMetrics[3]
+
+        val (lx, lz) = listener?.let { it.x to it.z } ?: (null to null)
 
         return ListeningEvalEntity(
             roomId = roomId,
@@ -107,21 +111,39 @@ class AnalysisRepository(
             metric4Detail = m3.detail,
 
             notes = notes.joinToString("\n"),
+
+            // 🔹 청취 위치 같이 저장
+            listenerX = lx,
+            listenerZ = lz,
+
             updatedAt = System.currentTimeMillis()
         )
     }
 
+
     private fun ListeningEvalEntity.toModel(): ListeningEval {
+        val metrics = listOf(
+            ListeningMetric(metric1Name, metric1Score, metric1Detail),
+            ListeningMetric(metric2Name, metric2Score, metric2Detail),
+            ListeningMetric(metric3Name, metric3Score, metric3Detail),
+            ListeningMetric(metric4Name, metric4Score, metric4Detail),
+        )
+
+        val notesList =
+            if (notes.isBlank()) emptyList()
+            else notes.split("\n")
+
+        val listenerVec =
+            if (listenerX != null && listenerZ != null) Vec2(listenerX, listenerZ)
+            else null
+
         return ListeningEval(
             total = total,
-            metrics = listOf(
-                ListeningMetric(metric1Name, metric1Score, metric1Detail),
-                ListeningMetric(metric2Name, metric2Score, metric2Detail),
-                ListeningMetric(metric3Name, metric3Score, metric3Detail),
-                ListeningMetric(metric4Name, metric4Score, metric4Detail),
-            ),
-            notes = if (notes.isBlank()) emptyList() else notes.split("\n")
+            metrics = metrics,
+            notes = notesList,
+            listener = listenerVec
         )
     }
+
 
 }

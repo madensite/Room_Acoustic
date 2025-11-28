@@ -71,12 +71,22 @@ fun AnalysisScreen(
             specBmp = spectrogramToBitmap(spec)
 
             // ★ RT60 / C50 / C80 계산 (TestConfig 기본값 가정)
-            val assumed = TestConfig(sampleRate = sampleRate) // fStart..tail은 기본값
-            metrics = computeAcousticMetrics(pcm, sampleRate, assumed)
+            val assumed = TestConfig(sampleRate = sampleRate)
+            val m = computeAcousticMetrics(pcm, sampleRate, assumed)
+
+            // 로컬 UI용
+            metrics = m
+
+            // 🔹 ViewModel에도 저장 → ChatScreen에서 사용 가능
+            val currentRoomId = vm.currentRoomId.value
+            if (currentRoomId != null) {
+                vm.setAcousticMetrics(currentRoomId, m)
+            }
         }.onFailure { e ->
             loadError = e.message ?: "WAV 로드 실패"
         }
     }
+
 
 
     Scaffold(

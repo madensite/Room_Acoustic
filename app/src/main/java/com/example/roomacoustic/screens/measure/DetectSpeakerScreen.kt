@@ -196,6 +196,7 @@ fun DetectSpeakerScreen(
                     onClick = {
                         accumulatedSpeakers.clear()
                         pendingDetections = emptyList()
+                        vm.clearSpeakersForCurrentRoom()
                         infoText = "모든 스피커 위치를 초기화했습니다. 처음부터 다시 측정해 주세요."
                         errorText = null
                     }
@@ -250,6 +251,9 @@ fun DetectSpeakerScreen(
 
                             // 4) manualSpeakers로 저장
                             vm.setManualSpeakers(roomId, finalSpeakers)
+
+                            // 4-1) 🔥 DB에도 저장 (ResultRender / 재실행 시 복원용)
+                            vm.saveLocalSpeakersForCurrentRoom(finalSpeakers)
 
                             // 5) Render로 이동
                             nav.navigate("${Screen.Render.route}?detected=true") {
@@ -435,23 +439,26 @@ private fun mapDetectionsToRoomLocal(
 ): List<Vec3> {
     if (detections.isEmpty()) return emptyList()
 
-    // 좌/우 순 정렬 (cxNorm 기준)
+    // 1) 가로 위치 기준으로 정렬 (왼→오른쪽 순서 보장)
     val sorted = detections.sortedBy { it.cxNorm }
 
-    // 양옆 Margin (방 가로의 15%)
-    val marginX = room.w * 0.15f
-    val usableW = (room.w - 2f * marginX).coerceAtLeast(room.w * 0.3f)
+    // 2) 방 가로 기준 usable 영역 설정
+    val marginX = room.w * 0.1f
+    val usableW = (room.w - 2f * marginX).coerceAtLeast(room.w * 0.2f)
 
-    // 깊이: 일단 전면에서 약 20% 지점에 놓는다 (D * 0.2)
-    // 나중에 RoomAnalysis에서 이동 권고가 z 방향까지 보정 가능.
-    val baseZ = (room.d * 0.2f).coerceIn(0.1f, room.d - 0.1f)
+    // 3) 깊이/높이 기본값 (기존 그대로)
+    val baseZ = (room.d * 0.15f).coerceIn(0.1f, room.d - 0.1f)
+    val baseY = (room.h * 0.4f).coerceIn(0.3f, room.h - 0.1f)
 
-    // 높이: 귀/스피커 높이 근처(방 높이의 80%)
-    val baseY = (room.h * 0.8f).coerceIn(0.3f, room.h - 0.1f)
+    val n = sorted.size
 
-    return sorted.map { det ->
-        val nx = det.cxNorm.coerceIn(0f, 1f)
-        val x = (marginX + nx * usableW)
+    return sorted.mapIndexed { index, _ ->
+        // 🔹 핵심: 감지 개수에 따라 가로 방향으로 균등 배치
+        // n == 1 이면 usable 영역의 중앙(t = 0.5)
+        // n >= 2 이면 [0.0, 1.0]을 (n-1) 등분해서 왼→오른쪽
+        val t = if (n == 1) 0.5f else index.toFloat() / (n - 1).toFloat()
+
+        val x = (marginX + t * usableW)
             .coerceIn(0f, room.w)
 
         Vec3(
@@ -462,10 +469,11 @@ private fun mapDetectionsToRoomLocal(
     }
 }
 
+
 private fun mergeSpeakers(
     base: List<Vec3>,
     newly: List<Vec3>,
-    minDist: Float = 0.00f  // 10cm 이내면 같은 스피커로 간주
+    minDist: Float = 0.10f  // 10cm 이내면 같은 스피커로 간주
 ): List<Vec3> {
     if (newly.isEmpty()) return base
     val out = base.toMutableList()

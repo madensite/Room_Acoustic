@@ -44,6 +44,8 @@ import com.example.roomacoustic.data.AppDatabase
 import com.example.roomacoustic.repo.ChatRepository
 import com.example.roomacoustic.viewmodel.ChatViewModel
 import com.example.roomacoustic.viewmodel.ChatViewModelFactory
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
@@ -53,6 +55,11 @@ fun RoomScreen(
     vm: RoomViewModel
 ) {
     val appCtx = LocalContext.current.applicationContext
+
+    // ★ 추가: 코루틴 스코프 + 채팅 버전
+    val scope = rememberCoroutineScope()
+    var chatVersion by remember { mutableStateOf(0) }
+
 
     // 1) DB + Repository 준비 (remember로 한 번만 생성)
     val chatRepository = remember {
@@ -160,8 +167,11 @@ fun RoomScreen(
             items(rooms, key = { it.id }) { room ->
 
                 // 이 방에 대화가 있는지 DB에서 가져와서 State로 보관
-                var hasChat by remember(room.id) { mutableStateOf(false) }
-                LaunchedEffect(room.id, rooms.size) {
+                // ★ chatVersion도 key로 넣어서, 버전이 바뀌면 다시 계산되도록
+                var hasChat by remember(room.id, chatVersion) { mutableStateOf(false) }
+
+                // ★ chatVersion에 의존해서, 대화 초기화 후 다시 쿼리
+                LaunchedEffect(room.id, rooms.size, chatVersion) {
                     hasChat = chatRepository.hasConversation(room.id)
                 }
 
@@ -177,7 +187,6 @@ fun RoomScreen(
                     ListItem(
                         headlineContent = { Text(room.title) },
                         trailingContent = {
-                            // ✅ room.hasChat 대신 hasChat 사용
                             StatusChips(
                                 hasMeasure = room.hasMeasure,
                                 hasChat = hasChat
@@ -191,7 +200,6 @@ fun RoomScreen(
                     )
                 }
             }
-
         }
     }
 
@@ -215,8 +223,9 @@ fun RoomScreen(
     tappedRoom?.let { room ->
         vm.select(room.id)
 
-        var hasChat by remember(room.id) { mutableStateOf(false) }
-        LaunchedEffect(room.id) {
+        // ★ 여기서도 chatVersion에 의존
+        var hasChat by remember(room.id, chatVersion) { mutableStateOf(false) }
+        LaunchedEffect(room.id, chatVersion) {
             hasChat = chatRepository.hasConversation(room.id)
         }
 
@@ -229,7 +238,7 @@ fun RoomScreen(
                 }
             } else {
                 // 결과 보기 분리
-                SheetItem("3D 결과 보기") {
+                SheetItem("공간 분석 보기") {
                     tappedRoom = null
                     nav.navigate(Screen.ResultRender.of(room.id)) {
                         launchSingleTop = true
@@ -307,7 +316,16 @@ fun RoomScreen(
                 nav.navigate(Screen.MeasureGraph.route)
             }
             SheetItem("대화 초기화") {
+                // 1) ChatViewModel에게 이 방 대화 완전 초기화 요청 (DB + 메모리)
+                chatVm.clearConversation(room.id)
+
+                // 2) RoomEntity 플래그도 리셋 (hasChat, lastChatPreview 등)
                 vm.setChat(room.id, false)
+
+                // 3) RoomScreen 쪽 hasChat 재계산용 버전 증가
+                chatVersion++
+
+                // 4) 시트 닫기
                 longPressedRoom = null
             }
             SheetItem("삭제", isDestructive = true) {

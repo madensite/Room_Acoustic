@@ -154,7 +154,6 @@ fun RoomAnalysisScreen(
                                     detail = m.detail
                                 )
                             },
-                            // notes + moveSuggestions(스피커 이동 권고)를 함께 텍스트로 저장
                             notes = buildList {
                                 addAll(eval.notes)
                                 eval.moveSuggestions.forEach { s ->
@@ -165,7 +164,8 @@ fun RoomAnalysisScreen(
                                                 "(${fmt(s.to.x)}, ${fmt(s.to.z)}) m (Δx=${dxCm}cm, Δz=${dzCm}cm)"
                                     )
                                 }
-                            }
+                            },
+                            listener = listener   // 🔹 여기 추가
                         )
                         vm.setListeningEval(roomId, listeningEval)
 

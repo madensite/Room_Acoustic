@@ -14,7 +14,7 @@ import androidx.room.RoomDatabase
         ListeningEvalEntity::class,
         ChatMessageEntity::class,
     ],
-    version = 4,                           // ★ 기존보다 +1
+    version = 5,                           // ★ 기존보다 +1
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {

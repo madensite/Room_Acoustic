@@ -12,7 +12,7 @@ data class ListeningEvalEntity(
     @PrimaryKey
     val roomId: Int,
 
-    val total: Int,          // 종합 점수 0~100
+    val total: Int,
 
     // metric1
     val metric1Name: String,
@@ -36,6 +36,10 @@ data class ListeningEvalEntity(
 
     // 조언들을 "\n"로 합쳐서 저장
     val notes: String,
+
+    // 🔹 청취 위치 (nullable)
+    val listenerX: Float?,   // W 방향 (x)
+    val listenerZ: Float?,   // D 방향 (z)
 
     val updatedAt: Long
 )

@@ -48,4 +48,10 @@ sealed class Screen(val route: String) {
     object ResultAnalysis : Screen("resultAnalysis/{roomId}") {
         fun of(roomId: Int) = "resultAnalysis/$roomId"
     }
+
+    /** ③ 스피커 · 청취 위치 2D 요약 화면 (RoomAnalysis 결과 조회) */
+    object ResultSpeaker : Screen("resultSpeaker/{roomId}") {
+        fun of(roomId: Int) = "resultSpeaker/$roomId"
+    }
+
 }

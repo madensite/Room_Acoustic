@@ -41,8 +41,12 @@ import androidx.compose.runtime.getValue
 
 // ✅ DB + Repo + Factory import
 import com.example.roomacoustic.data.AppDatabase
+import com.example.roomacoustic.data.RecordingEntity
 import com.example.roomacoustic.repo.ChatRepository
 import com.example.roomacoustic.viewmodel.ChatViewModelFactory
+
+import com.example.roomacoustic.util.AcousticMetrics
+
 
 enum class ChatMode { NEW, CONTINUE }
 
@@ -115,18 +119,31 @@ fun ChatScreen(
     val listener: Vec2? = manualListenerMap[roomId]
 
     val listeningEval: ListeningEval? = roomVm.listeningEvalFor(roomId)
+    val latestRecording: RecordingEntity? = roomVm.latestRecording.collectAsState().value
+    val acoustic: AcousticMetrics? = roomVm.acousticMetricsFor(roomId)
 
-    val contextJson by remember(roomId, roomSize, speakers, listener, listeningEval) {
+    val contextJson by remember(
+        roomId,
+        roomSize,
+        speakers,
+        listener,
+        listeningEval,
+        latestRecording,
+        acoustic
+    ) {
         mutableStateOf(
             buildRoomContextJson(
                 roomId = roomId,
                 roomSize = roomSize,
                 listener = listener,
                 speakers = speakers,
-                eval = listeningEval
+                eval = listeningEval,
+                recording = latestRecording,
+                acoustic = acoustic
             )
         )
     }
+
 
     val listState = rememberLazyListState()
 
@@ -302,12 +319,15 @@ private fun buildRoomContextJson(
     roomSize: RoomSize?,
     listener: Vec2?,
     speakers: List<Vec3>,
-    eval: ListeningEval?
+    eval: ListeningEval?,
+    recording: RecordingEntity?,
+    acoustic: AcousticMetrics?
 ): String {
     val sb = StringBuilder()
     sb.append("{\n")
     sb.append("  \"roomId\": $roomId,\n")
 
+    // 방 크기
     if (roomSize != null) {
         sb.append("  \"roomSize\": {\n")
         sb.append("    \"width_m\": ${roomSize.w},\n")
@@ -318,6 +338,7 @@ private fun buildRoomContextJson(
         sb.append("  \"roomSize\": null,\n")
     }
 
+    // 청취자 위치
     if (listener != null) {
         sb.append("  \"listener\": {\n")
         sb.append("    \"x_m_from_left\": ${listener.x},\n")
@@ -327,6 +348,38 @@ private fun buildRoomContextJson(
         sb.append("  \"listener\": null,\n")
     }
 
+    // 🔹 추가: 녹음 요약 + (있다면) 음향 지표들
+    if (recording != null) {
+        val escapedPath = recording.filePath.replace("\"", "\\\"")
+        sb.append("  \"recordingSummary\": {\n")
+        sb.append("    \"filePath\": \"$escapedPath\",\n")
+        sb.append("    \"duration_sec\": ${recording.durationSec},\n")
+        sb.append("    \"peak_dbfs\": ${recording.peakDbfs},\n")
+        sb.append("    \"rms_dbfs\": ${recording.rmsDbfs}\n")
+        // 🔸 만약 RecordingEntity에 RT60 / C50 / C80 같은 필드가 이미 있다면,
+        //    여기 아래에 형식 맞춰서 추가해 주면 됨 (예시는 아래에 따로 적어둘게)
+        sb.append("  },\n")
+    } else {
+        sb.append("  \"recordingSummary\": null,\n")
+    }
+
+    // 🔹 추가: RT60 / C50 / C80 등 녹음 기반 음향 지표
+    if (acoustic != null) {
+        sb.append("  \"acousticMetrics\": {\n")
+        sb.append("    \"rt60_sec\": ${acoustic.rt60Sec ?: "null"},\n")
+        sb.append(
+            "    \"rt60_method\": " +
+                    (acoustic.tMethod?.let { "\"$it\"" } ?: "null") +
+                    ",\n"
+        )
+        sb.append("    \"c50_db\": ${acoustic.c50dB ?: "null"},\n")
+        sb.append("    \"c80_db\": ${acoustic.c80dB ?: "null"}\n")
+        sb.append("  },\n")
+    } else {
+        sb.append("  \"acousticMetrics\": null,\n")
+    }
+
+    // 스피커 목록
     sb.append("  \"speakers\": [\n")
     speakers.forEachIndexed { idx, s ->
         sb.append(
@@ -337,6 +390,7 @@ private fun buildRoomContextJson(
     }
     sb.append("  ],\n")
 
+    // 청취 평가
     if (eval != null) {
         sb.append("  \"listeningEval\": {\n")
         sb.append("    \"totalScore\": ${eval.total},\n")
@@ -364,6 +418,7 @@ private fun buildRoomContextJson(
     sb.append("}")
     return sb.toString()
 }
+
 
 /* --------- GPT 타이핑 ... 버블 ---------- */
 @Composable

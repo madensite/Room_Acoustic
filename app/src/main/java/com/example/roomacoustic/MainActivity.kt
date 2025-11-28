@@ -35,6 +35,7 @@ import com.example.roomacoustic.screens.measure.AnalysisScreen
 
 import com.example.roomacoustic.screens.result.ResultRenderScreen
 import com.example.roomacoustic.screens.result.ResultAnalysisScreen
+import com.example.roomacoustic.screens.result.ResultSpeakerScreen
 import com.example.roomacoustic.viewmodel.RoomViewModel
 
 class MainActivity : ComponentActivity() {
@@ -149,6 +150,13 @@ fun AppRoot() {
             ) { backStackEntry ->
                 val roomId = backStackEntry.arguments!!.getInt("roomId")
                 ResultAnalysisScreen(nav = nav, vm = vm, roomId = roomId)
+            }
+            composable(
+                route = Screen.ResultSpeaker.route,
+                arguments = listOf(navArgument("roomId") { type = NavType.IntType })
+            ) { backStackEntry ->
+                val roomId = backStackEntry.arguments!!.getInt("roomId")
+                ResultSpeakerScreen(nav = nav, vm = vm, roomId = roomId)
             }
         }
     }

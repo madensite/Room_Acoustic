@@ -41,8 +41,20 @@ class ChatViewModel(
         _messages.value = initial
     }
 
-    fun clearConversation() {
-        _messages.value = emptyList()
+    // 🔥 이 방(roomId)의 대화를 완전히 초기화(DB + 메모리)
+    fun clearConversation(roomId: Int) {
+        viewModelScope.launch {
+            // 1) DB에서 삭제
+            chatRepository.clearConversation(roomId)
+
+            // 2) 메모리 상태에서도 이 방 메시지 제거
+            _messages.update { list ->
+                list.filterNot { it.roomId == roomId }
+            }
+
+            // 3) 혹시 로딩 중이던 것도 강제로 끄기
+            _isLoading.value = false
+        }
     }
 
     // ✅ 현재 모드 상태
